@@ -46,7 +46,7 @@ const FileCard = ({
 
                             <div className="absolute top-1 right-1 z-10 flex flex-col gap-1">
                                 <button
-                                    onClick={(e) => { onRotate(file.id); }}
+                                    onClick={() => { onRotate(file.id); }}
                                     onPointerDownCapture={(e) => e.stopPropagation()}
                                     className="rounded-full bg-background/80 p-1 shadow hover:bg-background"
                                     aria-label="Rotate PDF preview"
@@ -54,7 +54,7 @@ const FileCard = ({
                                     <RotateCcw className="h-4 w-4" />
                                 </button>
                                 <button
-                                    onClick={(e) => { onRemove(file.id); }}
+                                    onClick={() => { onRemove(file.id); }}
                                     onPointerDownCapture={(e) => e.stopPropagation()}
                                     className="rounded-full bg-background/80 p-1 shadow hover:bg-background"
                                     aria-label="Remove PDF file"

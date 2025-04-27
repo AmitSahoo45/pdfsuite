@@ -26,7 +26,7 @@ import { MAX_FILES, MAX_FILE_SIZE_MB } from '@/constants'
 import FileCard from '@/components/single-use/filecard';
 import { uuid } from '@/lib/utils';
 
-const mergePDF = () => {
+const MergePDF = () => {
     const [pdfFiles, setPdfFiles] = useState<Array<FileMeta>>([]);
     const [mergedPdfUrl, setMergedPdfUrl] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -344,6 +344,6 @@ const mergePDF = () => {
     )
 }
 
-export default mergePDF;
+export default MergePDF;
 
 
