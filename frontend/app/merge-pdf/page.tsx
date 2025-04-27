@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useState } from 'react'
-import { useDropzone, FileRejection, DropEvent } from 'react-dropzone';
+import { useDropzone, FileRejection } from 'react-dropzone';
 import { degrees, PDFDocument } from 'pdf-lib';
 import { ArrowUpDown, Merge, Trash2, Download } from 'lucide-react';
 import {
@@ -105,7 +105,7 @@ const MergePDF = () => {
     };
 
 
-    const onDrop = useCallback(async (acceptedFiles: File[], fileRejections: FileRejection[], event: DropEvent) => {
+    const onDrop = useCallback(async (acceptedFiles: File[]) => {
         setIsGeneratingPreviews(true);
         const newFilesPromises = acceptedFiles.map(async (file) => {
             try {
@@ -140,14 +140,14 @@ const MergePDF = () => {
             return combined;
         });
         setIsGeneratingPreviews(false);
-    }, [pdfFiles]); // Remove pdfFiles from dependency array - it can cause unnecessary runs. Check if needed. - imp
+    }, []); // Remove pdfFiles from dependency array - it can cause unnecessary runs. Check if needed. - imp - removed (review required)
 
 
 
     const onDropRejected = useCallback((fileRejections: FileRejection[]) => {
         console.warn("Rejected files:", fileRejections);
         fileRejections.forEach(({ file, errors }) => {
-            errors.forEach(({ code, message }) => {
+            errors.forEach(({ message }) => {
                 alert(`Error with ${file.name}: ${message}`);
             });
         });
