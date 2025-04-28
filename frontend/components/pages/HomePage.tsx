@@ -6,7 +6,7 @@ import FeatureGrid from '../single-use/FeatureCard'
 
 export function HomePageLanding() {
     return (
-        <div className="container mx-auto grid place-items-center min-h-screen w-full my-4">
+        <div className="container mx-auto grid place-items-center min-h-screen w-full my-4 px-6">
             <section className="text-center">
                 <h1 className="font-montserrat mb-3 text-5xl">PDFSuite</h1>
                 <p className='mb-4'>

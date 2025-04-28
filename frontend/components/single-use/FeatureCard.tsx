@@ -20,8 +20,8 @@ const FeatureGrid: React.FC<FeatureGridProps> = ({ items, className }) => (
     <div
         className={
             [
-                'grid w-full gap-6',
-                'grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))]',
+                'grid w-full gap-4',
+                'grid-cols-[repeat(auto-fit,minmax(250px,1fr))]',
                 className,
             ]
                 .filter(Boolean)
@@ -31,7 +31,7 @@ const FeatureGrid: React.FC<FeatureGridProps> = ({ items, className }) => (
         {items.map(({ title, description, icon: Icon, color, badge, reDirectURL }) => (
             <Card
                 key={title}
-                className="flex flex-col justify-between transition-all hover:shadow-lg sm:ml-0 ml-4"
+                className="flex flex-col justify-between transition-all hover:shadow-lg sm:ml-4 ml-0"
             >
                 <CardHeader className="space-y-2">
                     <span
