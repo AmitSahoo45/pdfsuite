@@ -15,3 +15,11 @@ export const uuid = (): string => {
     return v.toString(16);
   });
 }
+
+export const debounce = <T extends (...args: any[]) => void>(fn: T, ms: number): T => {
+  let timer: ReturnType<typeof setTimeout>;
+  return ((...args: any[]) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  }) as T;
+}

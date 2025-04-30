@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useDropzone, FileRejection } from 'react-dropzone';
 import { degrees, PDFDocument } from 'pdf-lib';
 import { ArrowUpDown, Merge, Trash2, Download } from 'lucide-react';
@@ -24,7 +24,9 @@ import {
 
 import { MAX_FILES, MAX_FILE_SIZE_MB } from '@/constants'
 import FileCard from '@/components/single-use/filecard';
-import { uuid } from '@/lib/utils';
+import { debounce, uuid } from '@/lib/utils';
+import { FileMeta, FileMetaSchema } from '@/hook/useMergePdf';
+import toast from 'react-hot-toast';
 
 const MergePDF = () => {
     const [pdfFiles, setPdfFiles] = useState<Array<FileMeta>>([]);
@@ -32,6 +34,21 @@ const MergePDF = () => {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [isGeneratingPreviews, setIsGeneratingPreviews] = useState<boolean>(false);
     const [sortingOrder, setSortingOrder] = useState<boolean | null>(null); // note -> null = not sorted, true = ascending, false = descending
+    const [worker, setWorker] = useState<Worker | null>(null);
+
+    useEffect(() => {
+        const w = new Worker(new URL('../../worker/preview.worker.ts', import.meta.url), { type: 'module' });
+        setWorker(w);
+
+        w.onerror = (err) => {
+            console.error('Worker error:', err);
+            toast.error('Oops! Please reload the page and try again.');
+        };
+
+        return () => {
+            w.terminate();
+        };
+    }, []);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -60,89 +77,21 @@ const MergePDF = () => {
         }
     };
 
-    const generatePreview = async (file: File): Promise<string> => {
-        try {
-            const pdfjsLib = await import('pdfjs-dist');
+    const generatePreview = useCallback(
+        (file: File): Promise<string> => {
+            if (!worker)
+                return Promise.reject(new Error('Worker not initialized'));
 
-            if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-                // pdfjsLib.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs`;
-
-                // --- CDN version --- TESTING - IMP
-                // https://cdn.jsdelivr.net/npm/pdfjs-dist@5.1.91/+esm
-                const pdfjsVersion = '5.2.133';
-                pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`;
-            }
-
-            const arrayBuffer = await file.arrayBuffer();
-            const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-            const page = await pdfDoc.getPage(1);
-
-            const desiredWidth = 140;
-            const viewport = page.getViewport({ scale: 1 });
-            const scale = desiredWidth / viewport.width;
-            const scaledViewport = page.getViewport({ scale });
-
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            if (!context) throw new Error('Could not get canvas context');
-
-            canvas.height = scaledViewport.height;
-            canvas.width = scaledViewport.width;
-
-            const renderContext = {
-                canvasContext: context,
-                viewport: scaledViewport,
-            };
-            await page.render(renderContext).promise;
-
-            pdfDoc.destroy();
-
-            return canvas.toDataURL('image/png');
-        } catch (error) {
-            console.error(`Error generating preview for ${file.name}:`, error);
-            return '/assets/placeholder-preview.svg';
-        }
-    };
-
-
-    const onDrop = useCallback(async (acceptedFiles: File[]) => {
-        setIsGeneratingPreviews(true);
-        const newFilesPromises = acceptedFiles.map(async (file) => {
-            try {
-                const pdfLibDoc = await PDFDocument.load(await file.arrayBuffer());
-                const pageCount = pdfLibDoc.getPageCount();
-                const previewUrl = await generatePreview(file);
-
-                return {
-                    id: uuid(),
-                    file,
-                    name: file.name,
-                    size: file.size,
-                    pages: pageCount,
-                    rotation: 0,
-                    previewImageUrl: previewUrl,
-                } as FileMeta;
-            } catch (error) {
-                console.error(`Failed to process file ${file.name}:`, error);
-                alert(`Failed to process file ${file.name}. It might be corrupted or password-protected.`);
-                return null;
-            }
-        });
-
-        const newFiles = (await Promise.all(newFilesPromises)).filter(f => f !== null) as FileMeta[];
-
-        setPdfFiles((prev) => {
-            const combined = [...prev, ...newFiles];
-            if (combined.length > MAX_FILES) {
-                alert(`You can only upload up to ${MAX_FILES} files in total.`);
-                return prev; // Or slice: combined.slice(0, MAX_FILES) - imp - review required
-            }
-            return combined;
-        });
-        setIsGeneratingPreviews(false);
-    }, []); // Remove pdfFiles from dependency array - it can cause unnecessary runs. Check if needed. - imp - removed (review required)
-
-
+            return new Promise((resolve, reject) => {
+                worker.onmessage = (e) => resolve(e.data as string);
+                worker.onerror = (err) => reject(err);
+                file
+                    .arrayBuffer()
+                    .then((buffer) => worker.postMessage(buffer, [buffer]));
+            });
+        },
+        [worker]
+    );
 
     const onDropRejected = useCallback((fileRejections: FileRejection[]) => {
         console.warn("Rejected files:", fileRejections);
@@ -153,9 +102,52 @@ const MergePDF = () => {
         });
     }, []);
 
+    const addFiles = useCallback(
+        async (files: File[]) => {
+            setIsGeneratingPreviews(true);
+            const { PDFDocument } = await import('pdf-lib');
+            const newMetas: FileMeta[] = [];
+            for (const file of files) {
+                try {
+                    const arr = await file.arrayBuffer();
+                    const pdfDoc = await PDFDocument.load(arr);
+                    const pages = pdfDoc.getPageCount();
+                    const rawPreview = await generatePreview(file);
+
+                    let previewUrl: string;
+                    if (typeof rawPreview === 'string') {
+                        previewUrl = rawPreview;
+                    } else if ((rawPreview as unknown) instanceof Blob) {
+                        previewUrl = URL.createObjectURL(rawPreview as Blob);
+                    } else {
+                        previewUrl = '/assets/placeholder-preview.svg';
+                    }
+
+                    const meta = {
+                        id: crypto.randomUUID(),
+                        file,
+                        name: file.name,
+                        size: file.size,
+                        pages,
+                        rotation: 0,
+                        previewImageUrl: previewUrl,   
+                    };
+
+                    newMetas.push(FileMetaSchema.parse(meta));
+                } catch (err) {
+                    console.error(err);
+                    toast.error(`Failed to process ${file.name}`);
+                }
+            }
+
+            setPdfFiles(prev => [...prev, ...newMetas]);
+            setIsGeneratingPreviews(false);
+        },
+        [generatePreview]
+    );
 
     const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
-        onDrop,
+        onDrop: addFiles,
         accept: { 'application/pdf': ['.pdf'] },
         multiple: true,
         maxFiles: MAX_FILES,
@@ -165,40 +157,47 @@ const MergePDF = () => {
         noKeyboard: true
     });
 
-    const handleRotate = (id: string) => setPdfFiles((f) => f.map((p) => (p.id === id ? { ...p, rotation: (p.rotation + 90) % 360 } : p)));
-    const handleRemoveFile = (id: string) => {
+    const handleRotate = useMemo(
+        () =>
+            debounce((id: string) => {
+                setPdfFiles(prev =>
+                    prev.map(f => (f.id === id ? { ...f, rotation: (f.rotation + 90) % 360 } : f))
+                );
+            }, 200),
+        []
+    );
+
+    const handleRemoveFile = useCallback((id: string) => {
         const fileToRemove = pdfFiles.find(f => f.id === id);
         if (fileToRemove?.previewImageUrl.startsWith('blob:'))
             URL.revokeObjectURL(fileToRemove.previewImageUrl);
 
         setPdfFiles((f) => f.filter((p) => p.id !== id));
-    }
+    }, [pdfFiles]);
 
-    const handleClearFiles = () => {
+    const handleClearFiles = useCallback(() => {
         pdfFiles.forEach(f => {
             if (f.previewImageUrl.startsWith('blob:')) URL.revokeObjectURL(f.previewImageUrl);
         });
         setPdfFiles([]);
         setMergedPdfUrl(null);
-    }
+    }, [pdfFiles]);
 
-    const handleMergePdfs = async () => {
+    const handleMergePdfs = useCallback(async () => {
         if (pdfFiles.length < 2) {
             alert("You need at least two PDF files to merge.");
             return;
         }
         setIsLoading(true);
         setMergedPdfUrl(null);
-        console.log("Starting merge for:", pdfFiles.map(f => f.name));
 
         try {
             const mergedPdf = await PDFDocument.create();
 
             for (const fileMeta of pdfFiles) {
-                console.log(`Processing ${fileMeta.name}`);
                 const pdfBytes = await fileMeta.file.arrayBuffer();
                 const pdf = await PDFDocument.load(pdfBytes, {
-                    ignoreEncryption: true, // <--- Ignore errors can be useful for problematic PDFs, but use with caution else getting error in UI while uploading
+                    ignoreEncryption: true, // <--- Ignore errors can be useful for problematic PDFs
                 });
 
                 const indices = pdf.getPageIndices();
@@ -232,26 +231,21 @@ const MergePDF = () => {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [pdfFiles]);
 
-
-    const handleSortByName = () => {
-        if (pdfFiles.length < 2) {
-            return;
-        }
-
-        const nextSortingOrder = sortingOrder === true ? false : true;
-
-        const sortedFiles = [...pdfFiles].sort((a, b) => {
-            const nameA = a.name.toLowerCase();
-            const nameB = b.name.toLowerCase();
-            if (nextSortingOrder === true) return nameA.localeCompare(nameB);
-            else return nameB.localeCompare(nameA);
-        });
-
-        setSortingOrder(nextSortingOrder);
-        setPdfFiles(sortedFiles);
-    };
+    const handleSortByName = useMemo(
+        () =>
+            debounce(() => {
+                setPdfFiles(prev => {
+                    const nextOrder = !sortingOrder;
+                    setSortingOrder(nextOrder);
+                    return [...prev].sort((a, b) =>
+                        nextOrder ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name)
+                    );
+                });
+            }, 200),
+        [sortingOrder]
+    );
 
     return (
         <div {...getRootProps()} className={`relative min-h-screen select-none ${isDragActive ? 'border-4 border-dashed border-indigo-600' : ''}`}>
@@ -341,7 +335,7 @@ const MergePDF = () => {
                         </button> */}
             </main>
         </div>
-    )
+    );
 }
 
 export default MergePDF;

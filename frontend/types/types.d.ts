@@ -8,11 +8,11 @@ type Feature = {
 };
 type FileMeta = {
     id: string;
-    file: File; // Keep the original File object
+    file: File; 
     name: string;
     size: number;
     pages: number;
     rotation: number;
-    previewImageUrl: string; // URL for the generated image preview
-    // preview: string; // We might not need the blob URL anymore
+    previewImageUrl: string; 
+    preview?: string; 
 };
