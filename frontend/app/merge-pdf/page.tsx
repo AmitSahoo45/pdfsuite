@@ -124,13 +124,13 @@ const MergePDF = () => {
                     }
 
                     const meta = {
-                        id: crypto.randomUUID(),
+                        id: uuid(),
                         file,
                         name: file.name,
                         size: file.size,
                         pages,
                         rotation: 0,
-                        previewImageUrl: previewUrl,   
+                        previewImageUrl: previewUrl,
                     };
 
                     newMetas.push(FileMetaSchema.parse(meta));
