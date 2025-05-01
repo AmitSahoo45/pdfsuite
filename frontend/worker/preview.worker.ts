@@ -23,15 +23,32 @@ if (typeof self.OffscreenCanvas === 'undefined') {
 
 
 if (!(self as any).document) {
+    // fix for Failed to load PDF document error : starts here
+    const mockElement = {
+        style: {},
+        remove: () => { console.log("Mock remove called"); }
+    };
+
+    const mockBodyOrHead = {
+        appendChild: () => mockElement,
+        removeChild: () => { },
+        style: {},
+    };
+
     (self as any).document = {
         createElement: (_: string) => {
-            if (typeof OffscreenCanvas !== 'undefined')
+            if (typeof OffscreenCanvas !== 'undefined' && _?.toLocaleLowerCase() === 'canvas') /* <<< fix */
                 return new OffscreenCanvas(1, 1);
 
             console.log("Cannot create OffscreenCanvas for document stub.");
             return null;
         },
+        head: mockBodyOrHead,
+        body: mockBodyOrHead,
+        documentElement: { style: {} }, /* <<<< fix */
     };
+
+    // fix for Failed to load PDF document error : ends here
 }
 
 
@@ -50,7 +67,12 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
         if (typeof OffscreenCanvas === 'undefined')
             throw new Error('OffscreenCanvas is not supported in this worker.');
 
-        pdf = await getDocument({ data: e.data }).promise;
+        pdf = await getDocument({ 
+            data: e.data,
+            useSystemFonts: true /* test fix - RCHK */
+        }).promise;
+
+
         if (pdf.numPages === 0)
             throw new Error('PDF has no pages.');
 
@@ -72,6 +94,9 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
 
         await page.render({ canvasContext: ctx as unknown as CanvasRenderingContext2D, viewport: scaledViewport }).promise;
 
+        // Cleaning up page resources <<<<< fix : rchk
+        page.cleanup();
+
         const blob = await offscreen.convertToBlob({ type: 'image/webp', quality: 0.8 });
         if (!blob)
             throw new Error('Failed to convert canvas to Blob.');
@@ -80,11 +105,12 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
         postMessage({ success: true, url: objectUrl });
 
     } catch (err) {
-        console.log('Error in preview.worker error:', err);
-        if (objectUrl)
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        console.error(`Error in preview.worker :`, errorMsg, err); 
+        if (objectUrl) 
             URL.revokeObjectURL(objectUrl);
-
-        postMessage({ success: false, error: (err instanceof Error ? err.message : String(err)), url: fallbackImageUrl });
+        
+        postMessage({ success: false, error: errorMsg, url: fallbackImageUrl });
     } finally {
         pdf?.destroy();
     }

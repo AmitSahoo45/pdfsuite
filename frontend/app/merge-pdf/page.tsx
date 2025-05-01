@@ -100,13 +100,15 @@ const MergePDF = () => {
 
                     const pages = pdfDoc.getPageCount();
                     if (pages === 0) {
-                        toast.error(`${file.name} has no pages and cannot be processed.`);
-
-                        if (previewUrl.startsWith('blob:'))
-                            URL.revokeObjectURL(previewUrl);
-
-                        return null;
+                        // fix for Failed to load PDF document error : starts here
+                        previewUrlPromise.then(url => {
+                            if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+                        }).catch(() => { }); 
+                        continue;
+                        // fix for Failed to load PDF document error : ends here
                     }
+
+                    // fix for Failed to load PDF document error : starts here
 
 
                     const meta: Omit<FileMeta, 'id'> = {
@@ -269,7 +271,7 @@ const MergePDF = () => {
             processingState={layoutProcessingState}
             fileLimits={layoutFileLimits}
         >
-            {{ 
+            {{
                 // Pass JSX elements for the named slots
                 fileDisplayArea: pdfFiles.length > 0 && (
                     <DndContext
@@ -292,7 +294,7 @@ const MergePDF = () => {
                         <button
                             title={sortingOrder === null ? "Sort A-Z" : sortingOrder ? "Sort Z-A" : "Sort A-Z"}
                             onClick={handleSortByName}
-                            disabled={isLoading || isGeneratingPreviews} 
+                            disabled={isLoading || isGeneratingPreviews}
                             className="flex items-center gap-1 rounded-md p-2 text-gray-500 transition hover:bg-gray-200 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <ArrowUpDown className="h-5 w-5" />
@@ -302,7 +304,7 @@ const MergePDF = () => {
                         <button
                             title={pdfFiles.length < 2 ? "Need at least 2 files" : "Merge all PDFs"}
                             onClick={handleMergePdfs}
-                            disabled={mergeDisabled} 
+                            disabled={mergeDisabled}
                             className={`flex items-center gap-1 rounded-md p-2 text-green-600 transition hover:bg-green-100 hover:text-green-700 disabled:cursor-not-allowed disabled:text-gray-400 disabled:hover:bg-transparent ${isLoading ? 'animate-pulse text-green-700' : ''}`}
                         >
                             <Merge className="h-5 w-5" />
