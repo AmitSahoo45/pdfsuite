@@ -36,7 +36,7 @@ export const FEATURES: Feature[] = [
         description: 'Separate one page or a whole set for easy conversion into independent PDF files.',
         icon: Split,
         color: 'bg-red-500/10 text-red-600',
-        badge: 'Coming Soon!!',
+        badge: '',
         reDirectURL: '/split-pdf'
     },
     {

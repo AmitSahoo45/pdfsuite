@@ -1,54 +1,30 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDropzone, FileRejection } from 'react-dropzone';
 import { degrees, PDFDocument } from 'pdf-lib';
 import { ArrowUpDown, Merge, Trash2, Download } from 'lucide-react';
-import {
-    DndContext,
-    closestCenter,
-    KeyboardSensor,
-    PointerSensor,
-    TouchSensor,
-    useSensor,
-    useSensors,
-    DragEndEvent,
-} from '@dnd-kit/core';
-import {
-    arrayMove,
-    SortableContext,
-    sortableKeyboardCoordinates,
-    rectSortingStrategy
-} from '@dnd-kit/sortable';
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy } from '@dnd-kit/sortable';
+import toast from 'react-hot-toast';
 
-
-import { MAX_FILES, MAX_FILE_SIZE_MB } from '@/constants'
-import FileCard from '@/components/single-use/filecard';
+import { MAX_FILES, MAX_FILE_SIZE_MB } from '@/constants';
+import FileCard from '@/components/layout/filecard';
 import { debounce, uuid } from '@/lib/utils';
 import { FileMeta, FileMetaSchema } from '@/hook/useMergePdf';
-import toast from 'react-hot-toast';
+import { generatePdfPreview, cleanupPdfPreviewWorker } from '@/service/pdfPreviewService';
+import PdfProcessingLayout from '@/components/layout/PdfProcessingLayout';
+
+
 
 const MergePDF = () => {
     const [pdfFiles, setPdfFiles] = useState<Array<FileMeta>>([]);
     const [mergedPdfUrl, setMergedPdfUrl] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [isGeneratingPreviews, setIsGeneratingPreviews] = useState<boolean>(false);
-    const [sortingOrder, setSortingOrder] = useState<boolean | null>(null); // note -> null = not sorted, true = ascending, false = descending
-    const [worker, setWorker] = useState<Worker | null>(null);
+    const [sortingOrder, setSortingOrder] = useState<boolean | null>(null);
 
-    useEffect(() => {
-        const w = new Worker(new URL('../../worker/preview.worker.ts', import.meta.url), { type: 'module' });
-        setWorker(w);
-
-        w.onerror = (err) => {
-            console.error('Worker error:', err);
-            toast.error('Oops! Please reload the page and try again.');
-        };
-
-        return () => {
-            w.terminate();
-        };
-    }, []);
+    useEffect(() => { return () => { cleanupPdfPreviewWorker() } }, []);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -74,57 +50,66 @@ const MergePDF = () => {
                 const newIndex = items.findIndex((item) => item.id === over.id);
                 return arrayMove(items, oldIndex, newIndex);
             });
+
+            setSortingOrder(null);
         }
     };
-
-    const generatePreview = useCallback(
-        (file: File): Promise<string> => {
-            if (!worker)
-                return Promise.reject(new Error('Worker not initialized'));
-
-            return new Promise((resolve, reject) => {
-                worker.onmessage = (e) => resolve(e.data as string);
-                worker.onerror = (err) => reject(err);
-                file
-                    .arrayBuffer()
-                    .then((buffer) => worker.postMessage(buffer, [buffer]));
-            });
-        },
-        [worker]
-    );
 
     const onDropRejected = useCallback((fileRejections: FileRejection[]) => {
         console.warn("Rejected files:", fileRejections);
         fileRejections.forEach(({ file, errors }) => {
-            errors.forEach(({ message }) => {
-                alert(`Error with ${file.name}: ${message}`);
+            errors.forEach(({ code, message }) => {
+                let userMessage = message;
+                if (code === 'file-too-large')
+                    userMessage = `${file.name} is too large. Maximum size is ${MAX_FILE_SIZE_MB}MB.`;
+                else if (code === 'too-many-files')
+                    // This might trigger multiple times, consider a single toast/alert. Todo  :::::: 
+                    userMessage = `Cannot add ${file.name}. Maximum number of files (${MAX_FILES}) reached.`;
+                else if (code === 'file-invalid-type')
+                    userMessage = `${file.name} is not a valid PDF file.`;
+
+                toast.error(userMessage);
             });
         });
     }, []);
 
     const addFiles = useCallback(
         async (files: File[]) => {
+            if (!files || files.length === 0) return;
+
+            if (pdfFiles.length + files.length > MAX_FILES) {
+                toast.error(`You can only add ${MAX_FILES} files in total. Please remove some files first.`);
+
+                // Optionally slice the acceptedFiles array to only add allowed number
+                files = files.slice(0, MAX_FILES - pdfFiles.length);
+                if (files.length === 0) return; // Stop if no files can be added
+                return; // Stop processing if limit is exceeded by the drop
+            }
+
             setIsGeneratingPreviews(true);
             const { PDFDocument } = await import('pdf-lib');
             const newMetas: FileMeta[] = [];
+
             for (const file of files) {
                 try {
-                    const arr = await file.arrayBuffer();
-                    const pdfDoc = await PDFDocument.load(arr);
-                    const pages = pdfDoc.getPageCount();
-                    const rawPreview = await generatePreview(file);
+                    const previewUrlPromise = generatePdfPreview(file);
+                    const fileBuffer = await file.arrayBuffer();
+                    const pdfDocPromise = PDFDocument.load(fileBuffer, { ignoreEncryption: true });
 
-                    let previewUrl: string;
-                    if (typeof rawPreview === 'string') {
-                        previewUrl = rawPreview;
-                    } else if ((rawPreview as unknown) instanceof Blob) {
-                        previewUrl = URL.createObjectURL(rawPreview as Blob);
-                    } else {
-                        previewUrl = '/assets/placeholder-preview.svg';
+                    const [previewUrl, pdfDoc] = await Promise.all([previewUrlPromise, pdfDocPromise]);
+
+                    const pages = pdfDoc.getPageCount();
+                    if (pages === 0) {
+                        toast.error(`${file.name} has no pages and cannot be processed.`);
+
+                        if (previewUrl.startsWith('blob:'))
+                            URL.revokeObjectURL(previewUrl);
+
+                        return null;
                     }
 
-                    const meta = {
-                        id: uuid(),
+
+                    const meta: Omit<FileMeta, 'id'> = {
                         file,
                         name: file.name,
                         size: file.size,
@@ -132,19 +117,21 @@ const MergePDF = () => {
                         rotation: 0,
                         previewImageUrl: previewUrl,
                     };
-
-                    newMetas.push(FileMetaSchema.parse(meta));
+                    const validatedMeta = FileMetaSchema.omit({ id: true }).parse(meta);
+                    newMetas.push({ ...validatedMeta, id: uuid(), file: file });
                 } catch (err) {
-                    console.error(err);
-                    toast.error(`Failed to process ${file.name}`);
+                    console.log(`Failed to process ${file.name}:`, err);
+                    toast.error(`Failed processing ${file.name}. Try re-uploading.`);
+                    continue;
                 }
             }
 
-            setPdfFiles(prev => [...prev, ...newMetas]);
+            setPdfFiles(prev => [...prev, ...newMetas].slice(0, MAX_FILES));
             setIsGeneratingPreviews(false);
         },
-        [generatePreview]
+        [pdfFiles]
     );
+
 
     const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
         onDrop: addFiles,
@@ -154,7 +141,8 @@ const MergePDF = () => {
         maxSize: MAX_FILE_SIZE_MB * 1024 * 1024,
         onDropRejected: onDropRejected,
         noClick: true,
-        noKeyboard: true
+        noKeyboard: true,
+        disabled: isLoading || isGeneratingPreviews,
     });
 
     const handleRotate = useMemo(
@@ -163,75 +151,95 @@ const MergePDF = () => {
                 setPdfFiles(prev =>
                     prev.map(f => (f.id === id ? { ...f, rotation: (f.rotation + 90) % 360 } : f))
                 );
-            }, 200),
+            }, 150),
         []
     );
 
     const handleRemoveFile = useCallback((id: string) => {
-        const fileToRemove = pdfFiles.find(f => f.id === id);
-        if (fileToRemove?.previewImageUrl.startsWith('blob:'))
-            URL.revokeObjectURL(fileToRemove.previewImageUrl);
+        setPdfFiles((prevFiles) => {
+            const fileToRemove = prevFiles.find(f => f.id === id);
+            if (fileToRemove?.previewImageUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(fileToRemove.previewImageUrl);
+            }
+            return prevFiles.filter((p) => p.id !== id);
+        });
 
-        setPdfFiles((f) => f.filter((p) => p.id !== id));
-    }, [pdfFiles]);
+        setSortingOrder(null);
+    }, []);
 
     const handleClearFiles = useCallback(() => {
         pdfFiles.forEach(f => {
-            if (f.previewImageUrl.startsWith('blob:')) URL.revokeObjectURL(f.previewImageUrl);
+            if (f.previewImageUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(f.previewImageUrl);
+            }
         });
         setPdfFiles([]);
         setMergedPdfUrl(null);
+        setSortingOrder(null);
     }, [pdfFiles]);
 
     const handleMergePdfs = useCallback(async () => {
         if (pdfFiles.length < 2) {
-            alert("You need at least two PDF files to merge.");
+            toast.error("You need at least two PDF files to merge.");
             return;
         }
         setIsLoading(true);
+
+        if (mergedPdfUrl && mergedPdfUrl.startsWith('blob:'))
+            URL.revokeObjectURL(mergedPdfUrl);
+
         setMergedPdfUrl(null);
 
         try {
             const mergedPdf = await PDFDocument.create();
 
             for (const fileMeta of pdfFiles) {
-                const pdfBytes = await fileMeta.file.arrayBuffer();
-                const pdf = await PDFDocument.load(pdfBytes, {
-                    ignoreEncryption: true, // <--- Ignore errors can be useful for problematic PDFs
-                });
+                try {
+                    const pdfBytes = await fileMeta.file.arrayBuffer();
 
-                const indices = pdf.getPageIndices();
-                const copiedPages = await mergedPdf.copyPages(pdf, indices);
-                copiedPages.forEach((page) => {
-                    if (fileMeta.rotation !== 0)
-                        page.setRotation(degrees(fileMeta.rotation));
+                    const pdf = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
 
-                    mergedPdf.addPage(page);
-                });
+                    const indices = pdf.getPageIndices();
+                    if (indices.length === 0)
+                        continue;
+
+                    const copiedPages = await mergedPdf.copyPages(pdf, indices);
+                    copiedPages.forEach((page) => {
+                        const originalRotation = page.getRotation().angle;
+                        page.setRotation(degrees((originalRotation + fileMeta.rotation) % 360));
+                        mergedPdf.addPage(page);
+                    });
+                } catch (loadError) {
+                    console.log(`Error loading or copying pages from ${fileMeta.name}:`, loadError);
+                    toast.error(`Skipping ${fileMeta.name} due to an error during processing.`);
+                }
             }
+
+            if (mergedPdf.getPageCount() === 0)
+                throw new Error("No pages could be added to the merged document. Check input files.");
 
             const mergedPdfBytes = await mergedPdf.save();
             const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
             const url = URL.createObjectURL(blob);
             setMergedPdfUrl(url);
+            toast.success("PDFs merged successfully!");
 
-            // ------ Automatic Download ----- To be implemented later if required (imp)
+            // Optional: Trigger automatic download (consider UX implications)
             // const link = document.createElement('a');
             // link.href = url;
             // link.download = 'merged_document.pdf';
             // document.body.appendChild(link);
             // link.click();
             // document.body.removeChild(link);
-            // // Optional: Revoke URL after a delay if not needed for display
-            // // setTimeout(() => URL.revokeObjectURL(url), 1000);
+            // // Don't revoke URL immediately if displaying download button
         } catch (error) {
             console.error('Error merging PDFs:', error);
-            alert(`An error occurred during merging: ${error instanceof Error ? error.message : String(error)}`);
+            toast.error(`Merge failed: ${error instanceof Error ? error.message : String(error)}`);
             setMergedPdfUrl(null);
         } finally {
             setIsLoading(false);
         }
-    }, [pdfFiles]);
+    }, [pdfFiles, mergedPdfUrl]);
 
     const handleSortByName = useMemo(
         () =>
@@ -247,97 +255,92 @@ const MergePDF = () => {
         [sortingOrder]
     );
 
+    const buttonsDisabled = isLoading || isGeneratingPreviews;
+    const mergeDisabled = buttonsDisabled || pdfFiles.length < 2;
+
+    const layoutDropzoneProps = { getRootProps, getInputProps, open, isDragActive };
+    const layoutProcessingState = { isLoading, isGeneratingPreviews };
+    const layoutFileLimits = { maxFiles: MAX_FILES, maxFileSizeMB: MAX_FILE_SIZE_MB };
+
     return (
-        <div {...getRootProps()} className={`relative min-h-screen select-none ${isDragActive ? 'border-4 border-dashed border-indigo-600' : ''}`}>
-            <input {...getInputProps()} />
-
-            <div
-                className={`fixed inset-0 z-50 flex items-center justify-center bg-white/80 backdrop-blur-sm transition-opacity
-        ${isDragActive ? 'opacity-100' : 'opacity-0 pointer-events-none'} `}
-            >
-                <div className="rounded-xl border-4 border-dashed border-indigo-600 bg-white p-10 text-2xl font-semibold text-indigo-700">
-                    Yaay! Drop those PDFs here!
-                </div>
-            </div>
-            <main className="container mx-auto flex flex-col items-center py-6">
-                <h1 className="font-montserrat my-5 text-4xl">Merge PDF</h1>
-
-                <div className='mb-4'>
-                    <button
-                        type="button"
-                        onClick={open}
-                        disabled={isGeneratingPreviews || isLoading}
-                        className="mb-2 rounded-lg bg-indigo-600 px-5 py-3 text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-                    >
-                        {isGeneratingPreviews ? 'Processing...' : 'Select PDF files'}
-                    </button>
-                    <p className='text-center text-[0.75rem] font-medium text-gray-500'>or drop PDFs here</p>
-                </div>
-
-                {!!pdfFiles.length && (
+        <PdfProcessingLayout
+            title="Merge PDF Files"
+            dropzoneProps={layoutDropzoneProps}
+            processingState={layoutProcessingState}
+            fileLimits={layoutFileLimits}
+        >
+            {{ 
+                // Pass JSX elements for the named slots
+                fileDisplayArea: pdfFiles.length > 0 && (
                     <DndContext
                         sensors={sensors}
                         collisionDetection={closestCenter}
                         onDragEnd={handleDragEnd}
                     >
                         <SortableContext items={pdfFiles.map(f => f.id)} strategy={rectSortingStrategy}>
-                            <div className="mt-4 flex flex-wrap justify-center gap-4 touch-none">
+                            <div className="mb-8 mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 justify-center gap-4 touch-none px-2">
                                 {pdfFiles.map((f) => (
                                     <FileCard key={f.id} file={f} onRotate={handleRotate} onRemove={handleRemoveFile} />
                                 ))}
                             </div>
                         </SortableContext>
                     </DndContext>
-                )}
+                ),
 
-
-                {pdfFiles.length > 0 && (
-                    <div className="mt-10 flex flex-wrap justify-center gap-4">
+                actionButtonsArea: pdfFiles.length > 0 && (
+                    <div className="mt-6 flex flex-wrap items-center justify-center gap-3 rounded-lg bg-gray-50 p-4 shadow-sm border">
                         <button
+                            title={sortingOrder === null ? "Sort A-Z" : sortingOrder ? "Sort Z-A" : "Sort A-Z"}
                             onClick={handleSortByName}
-                            disabled={isLoading || isGeneratingPreviews}
-                            className="rounded px-4 py-2 text-gray-400 hover:text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            disabled={isLoading || isGeneratingPreviews} 
+                            className="flex items-center gap-1 rounded-md p-2 text-gray-500 transition hover:bg-gray-200 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <ArrowUpDown className="h-5 w-5" />
-                        </button>
-                        <button
-                            onClick={handleMergePdfs}
-                            disabled={isLoading || isGeneratingPreviews || pdfFiles.length < 2}
-                            className={`rounded px-4 py-2 text-green-600 hover:text-green-700 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer ${isLoading ? 'animate-pulse text-gray-800' : ''}`}
-                        >
-                            <Merge className="h-5 w-5" />
-                        </button>
-                        <button
-                            onClick={handleClearFiles}
-                            disabled={isLoading || isGeneratingPreviews}
-                            className="rounded px-4 py-2 text-red-500 hover:text-red-600 disabled:opacity-50 cursor-pointer"
-                        >
-                            <Trash2 className="h-5 w-5" />
+                            <span className="text-sm font-medium">Sort</span>
                         </button>
 
-                        {mergedPdfUrl && (
+                        <button
+                            title={pdfFiles.length < 2 ? "Need at least 2 files" : "Merge all PDFs"}
+                            onClick={handleMergePdfs}
+                            disabled={mergeDisabled} 
+                            className={`flex items-center gap-1 rounded-md p-2 text-green-600 transition hover:bg-green-100 hover:text-green-700 disabled:cursor-not-allowed disabled:text-gray-400 disabled:hover:bg-transparent ${isLoading ? 'animate-pulse text-green-700' : ''}`}
+                        >
+                            <Merge className="h-5 w-5" />
+                            <span className="text-sm font-medium">{isLoading ? 'Merging...' : 'Merge'}</span>
+                        </button>
+
+                        <button
+                            title="Remove all files"
+                            onClick={handleClearFiles}
+                            disabled={isLoading || isGeneratingPreviews}
+                            className="flex items-center gap-1 rounded-md p-2 text-red-500 transition hover:bg-red-100 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            <Trash2 className="h-5 w-5" />
+                            <span className="text-sm font-medium">Clear</span>
+                        </button>
+
+                        {mergedPdfUrl && !isLoading && (
                             <a
                                 href={mergedPdfUrl}
                                 download="merged_document.pdf"
-                                className="rounded p-2 text-purple-600 hover:text-purple-700 disabled:opacity-50 cursor-pointer"
+                                title="Download Merged PDF"
+                                className="ml-2 flex items-center gap-1 rounded-md bg-purple-600 px-3 py-2 text-white shadow transition hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
                             >
                                 <Download className="h-5 w-5" />
+                                <span className="text-sm font-medium">Download</span>
                             </a>
                         )}
                     </div>
-                )}
-                {/* Optional - might nnot even be required - thorough review needed */}
-                {/* <button
-                            onClick={() => { if (mergedPdfUrl) URL.revokeObjectURL(mergedPdfUrl); setMergedPdfUrl(null); }}
-                            className="ml-4 text-sm text-gray-500 hover:underline"
-                        >
-                            Dismiss
-                        </button> */}
-            </main>
-        </div>
+                ),
+
+                noFilesPlaceholder: pdfFiles.length === 0 && !isGeneratingPreviews && (
+                    <div className="mt-10 text-center text-gray-500">
+                        <p>Add some PDF files to get started!</p>
+                    </div>
+                )
+            }}
+        </PdfProcessingLayout>
     );
 }
 
 export default MergePDF;
-
-

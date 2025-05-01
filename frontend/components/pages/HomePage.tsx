@@ -2,7 +2,7 @@
 
 import { FEATURES } from '@/constants/featureData'
 import React from 'react'
-import FeatureGrid from '../single-use/FeatureCard'
+import FeatureGrid from '../layout/FeatureCard'
 
 export function HomePageLanding() {
     return (
