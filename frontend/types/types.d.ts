@@ -32,8 +32,8 @@ interface PreviewRequest {
 }
 
 interface PdfProcessingLayoutProps {
-    title: string; // This will be teh title fo the page
-    dropzoneProps: { // Props needed from useDropzone hook
+    title: string; 
+    dropzoneProps: {
         getRootProps: <T extends DropzoneRootProps>(props?: T) => T;
         getInputProps: <T extends DropzoneInputProps>(props?: T) => T;
         // Todo : Read docs whats dropzoneProps might be requiring

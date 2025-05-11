@@ -4,43 +4,42 @@ const requestQueue: PreviewRequest[] = [];
 
 const getWorker = (): Worker => {
     if (!worker) {
-        worker = new Worker(new URL('../worker/preview.worker.ts', import.meta.url), {type: 'module', /*name: 'pdf-preview-worker' << ---- Todo: re-visit doc  */ });
+        worker = new Worker(new URL('../worker/preview.worker.ts', import.meta.url), { type: 'module', /*name: 'pdf-preview-worker' << ---- Todo: re-visit doc  */ });
 
         worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
             isWorkerBusy = false;
             const response = event.data;
-            const processedRequest = requestQueue.shift(); 
+            const processedRequest = requestQueue.shift();
 
             if (processedRequest) {
-                if (response.success) 
+                if (response.success)
                     processedRequest.resolve(response.url);
-                else {
-                    console.log(`Preview generation failed: ${response.error}`);
-                    processedRequest.resolve(response.url);
-                }
+                else
+                    processedRequest.reject(new Error(response.error || 'Preview worker failed'));
             } else {
                 console.warn("Worker message received but no matching request found in queue.");
 
-                if (response.success && response.url.startsWith('blob:')) 
+                if (response.success && response.url.startsWith('blob:'))
                     URL.revokeObjectURL(response.url);
             }
 
-            processQueue(); 
+            processQueue();
         };
 
         worker.onerror = (error) => {
             console.error('Unhandled Preview Worker error:', error);
             isWorkerBusy = false;
-            const processedRequest = requestQueue.shift(); 
+            const processedRequest = requestQueue.shift();
 
             if (processedRequest) {
                 // processedRequest.reject(error); << ----- Todo: check with reject
-                processedRequest.resolve('/assets/placeholder-preview.svg'); 
+                // processedRequest.resolve('/assets/placeholder-preview.svg'); // old code
+                processedRequest.reject(error);
             }
 
             worker?.terminate();
             worker = null;
-            isWorkerBusy = false; 
+            isWorkerBusy = false;
 
             while (requestQueue.length > 0) {
                 const req = requestQueue.shift();
@@ -54,7 +53,7 @@ const getWorker = (): Worker => {
 
 
 const processQueue = () => {
-    if (isWorkerBusy || requestQueue.length === 0) 
+    if (isWorkerBusy || requestQueue.length === 0)
         return;
 
     isWorkerBusy = true;
@@ -68,8 +67,8 @@ const processQueue = () => {
         .catch(error => {
             console.error("Error reading file for preview:", error);
             isWorkerBusy = false;
-            const failedRequest = requestQueue.shift(); 
-            failedRequest?.resolve('/assets/placeholder-preview.svg'); 
+            const failedRequest = requestQueue.shift();
+            failedRequest?.resolve('/assets/placeholder-preview.svg');
             // failedRequest?.reject(error);
             processQueue(); // Try next request
         });
@@ -85,7 +84,7 @@ export const generatePdfPreview = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
         requestQueue.push({ file, resolve, reject });
 
-        if (!isWorkerBusy) 
+        if (!isWorkerBusy)
             processQueue();
     });
 };
