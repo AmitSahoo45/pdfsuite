@@ -15,7 +15,7 @@ import { debounce, uuid } from '@/lib/utils';
 import FileCard from '@/components/layout/filecard';
 
 
-const page = () => {
+const Page = () => {
     const [pdfFiles, setPdfFiles] = useState<Array<FileMeta>>([]);
     const [isGeneratingPreviews, setIsGeneratingPreviews] = useState<boolean>(false);
     const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -258,4 +258,4 @@ const page = () => {
     )
 }
 
-export default page
+export default Page;
