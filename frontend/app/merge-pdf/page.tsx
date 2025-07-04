@@ -92,24 +92,30 @@ const MergePDF = () => {
 
             for (const file of files) {
                 try {
-                    const previewUrlPromise = generatePdfPreview(file);
-                    const fileBuffer = await file.arrayBuffer();
-                    const pdfDocPromise = PDFDocument.load(fileBuffer, { ignoreEncryption: true });
-
-                    const [previewUrl, pdfDoc] = await Promise.all([previewUrlPromise, pdfDocPromise]);
+                    let pdfDoc;
+                    try {
+                        const buffer = await file.arrayBuffer();
+                        pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+                    } catch (err) {
+                        console.error(`Failed loading PDF ${file.name}:`, err);
+                        toast.error(`Couldn't load ${file.name}. Is it a valid PDF?`);
+                        continue;
+                    }
 
                     const pages = pdfDoc.getPageCount();
                     if (pages === 0) {
-                        // fix for Failed to load PDF document error : starts here
-                        previewUrlPromise.then(url => {
-                            if (url.startsWith('blob:')) URL.revokeObjectURL(url);
-                        }).catch(() => { }); 
+                        toast.error(`${file.name} has no pages. Skipping.`);
                         continue;
-                        // fix for Failed to load PDF document error : ends here
                     }
 
-                    // fix for Failed to load PDF document error : starts here
-
+                    let previewUrl: string;
+                    try {
+                        previewUrl = await generatePdfPreview(file);
+                    } catch (err) {
+                        console.error(`Preview failed for ${file.name}:`, err);
+                        toast.error(`Failed generating preview for ${file.name}.`);
+                        continue;
+                    }
 
                     const meta: Omit<FileMeta, 'id'> = {
                         file,
@@ -120,7 +126,7 @@ const MergePDF = () => {
                         previewImageUrl: previewUrl,
                     };
                     const validatedMeta = FileMetaSchema.omit({ id: true }).parse(meta);
-                    newMetas.push({ ...validatedMeta, id: uuid(), file: file });
+                    newMetas.push({ ...validatedMeta, id: uuid(), file });
                 } catch (err) {
                     console.log(`Failed to process ${file.name}:`, err);
                     toast.error(`Failed processing ${file.name}. Try re-uploading.`);
