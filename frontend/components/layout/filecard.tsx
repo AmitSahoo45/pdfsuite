@@ -9,7 +9,7 @@ import {
 import { RotateCcw, X } from "lucide-react";
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { FileMeta } from '@/hook/useMergePdf';
+import type { FileMeta } from '@/hook/fileMeta';
 
 const FileCard = ({
     file,
