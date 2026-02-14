@@ -7,11 +7,13 @@ const bebasNeue = Bebas_Neue({
   weight: "400",
   variable: "--font-bebas-neue",
   subsets: ["latin"],
+  display: 'swap',
 });
 
 const montserrat = Montserrat({
   variable: "--font-montserrat",
   subsets: ["latin"],
+  display: 'swap',
 });
 
 export const metadata: Metadata = {
