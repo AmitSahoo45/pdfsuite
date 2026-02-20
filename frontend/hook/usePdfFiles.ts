@@ -107,8 +107,8 @@ export function usePdfFiles(options?: UsePdfFilesOptions) {
                         previewUrl = await generatePdfPreview(file);
                     } catch (err) {
                         console.error(`Preview failed for ${file.name}:`, err);
-                        toast.error(`Failed generating preview for ${file.name}.`);
-                        continue;
+                        toast.error(`Could not generate thumbnail for ${file.name}, using placeholder.`);
+                        previewUrl = '/assets/placeholder-preview.svg';
                     }
 
                     const meta: Omit<FileMeta, 'id'> = {

@@ -69,7 +69,10 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
 
         pdf = await getDocument({ 
             data: e.data,
-            useSystemFonts: true /* test fix - RCHK */
+            useSystemFonts: true, /* test fix - RCHK */
+            standardFontDataUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/standard_fonts/`,
+            cMapUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/cmaps/`,
+            cMapPacked: true,
         }).promise;
 
 
@@ -119,6 +122,7 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
 self.onerror = (event) => {
     console.log("Unhandled worker error:", event);
     postMessage({ success: false, error: 'Unhandled worker error', url: fallbackImageUrl });
+    event.preventDefault();
 };
 
 export { };
