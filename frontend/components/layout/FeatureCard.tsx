@@ -1,15 +1,6 @@
-'use client';
-
 import * as React from 'react';
 import Link from 'next/link';
-import { CircleArrowRightIcon } from 'lucide-react';
-import {
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-} from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { ArrowRight } from 'lucide-react';
 
 interface FeatureGridProps {
     items: Feature[];
@@ -18,51 +9,69 @@ interface FeatureGridProps {
 
 const FeatureGrid: React.FC<FeatureGridProps> = ({ items, className }) => (
     <div
-        className={
-            [
-                'grid w-full gap-4',
-                'grid-cols-[repeat(auto-fit,minmax(250px,1fr))]',
-                className,
-            ]
-                .filter(Boolean)
-                .join(' ')
-        }
+        className={`grid w-full gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 ${className ?? ''}`}
     >
-        {items.map(({ title, description, icon: Icon, color, badge, reDirectURL }) => (
-            <Card
-                key={title}
-                className="flex flex-col justify-between transition-all hover:shadow-lg sm:ml-4 ml-0"
-            >
-                <CardHeader className="space-y-2">
-                    <span
-                        className={`inline-flex h-10 w-10 items-center justify-center rounded-md ${color}`}
-                    >
-                        <Icon className="h-5 w-5" />
-                    </span>
-                    <CardTitle className="flex items-center gap-2 text-lg font-semibold">
-                        {title}
-                        {badge && (
-                            <Badge variant="secondary" className="text-xs text-red-500/70">
-                                {badge}
-                            </Badge>
-                        )}
-                    </CardTitle>
-                </CardHeader>
+        {items.map(({ title, description, icon: Icon, color, badge, reDirectURL }) => {
+            const isComingSoon = badge === 'Coming Soon!!';
+            const href = isComingSoon ? undefined : (reDirectURL || '/');
 
-                <CardContent className="pb-6 text-sm text-muted-foreground">
-                    <p>{description}</p>
-                    <Link
-                        href={reDirectURL || '#'}
-                        className={`inline-flex items-center justify-center py-2 text-sm font-semibold text-primary underline underline-offset-4 transition-colors hover:text-primary/80 ${(badge === 'Coming Soon!!') && 'pointer-events-none opacity-50'}`}
-                        rel="noopener noreferrer"
-                        aria-label={`Learn more about ${title}`}
-                        aria-describedby={`Learn more about ${title}`}
+            const cardContent = (
+                <>
+                    <div className="flex items-start justify-between">
+                        <span
+                            className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${color}`}
+                            aria-hidden="true"
+                        >
+                            <Icon className="h-5 w-5" />
+                        </span>
+
+                        {isComingSoon && (
+                            <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">
+                                Soon
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="mt-4">
+                        <h3 className="text-base font-semibold text-stone-900">
+                            {title}
+                        </h3>
+                        <p className="mt-1.5 text-sm leading-relaxed text-stone-500">
+                            {description}
+                        </p>
+                    </div>
+
+                    {!isComingSoon && (
+                        <div className="mt-4 flex items-center gap-1 text-sm font-medium text-red-600 transition-transform group-hover:translate-x-1">
+                            <span>Use tool</span>
+                            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                        </div>
+                    )}
+                </>
+            );
+
+            if (isComingSoon) {
+                return (
+                    <div
+                        key={title}
+                        className="group relative rounded-xl border border-stone-200/80 bg-white p-5 opacity-60"
                     >
-                        <CircleArrowRightIcon className="h-6 w-6 mt-3" />
-                    </Link>
-                </CardContent>
-            </Card>
-        ))}
+                        {cardContent}
+                    </div>
+                );
+            }
+
+            return (
+                <Link
+                    key={title}
+                    href={href!}
+                    className="group relative rounded-xl border border-stone-200/80 bg-white p-5 transition-all duration-200 hover:border-stone-300 hover:shadow-md hover:shadow-stone-200/50"
+                    aria-label={`${title} - ${description}`}
+                >
+                    {cardContent}
+                </Link>
+            );
+        })}
     </div>
 );
 

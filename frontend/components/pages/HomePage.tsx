@@ -1,20 +1,90 @@
-'use client';
+import { FEATURES } from '@/constants/featureData';
+import FeatureGrid from '../layout/FeatureCard';
+import {
+    Shield,
+    Zap,
+    CloudOff,
+} from 'lucide-react';
 
-import { FEATURES } from '@/constants/featureData'
-import React from 'react'
-import FeatureGrid from '../layout/FeatureCard'
+const VALUE_PROPS = [
+    {
+        icon: Zap,
+        title: 'Lightning Fast',
+        text: 'All processing happens in your browser. No uploading, no waiting.',
+    },
+    {
+        icon: Shield,
+        title: '100% Secure',
+        text: 'Your files never leave your device. Complete privacy guaranteed.',
+    },
+    {
+        icon: CloudOff,
+        title: 'No Signup Required',
+        text: 'Free to use, no accounts, no subscriptions, no limits.',
+    },
+] as const;
 
 export function HomePageLanding() {
     return (
-        <div className="container mx-auto grid place-items-center min-h-screen w-full my-4 px-6">
-            <section className="text-center">
-                <h1 className="font-montserrat mb-3 text-5xl">PDFSuite</h1>
-                <p className='mb-4'>
-                    Experience the power of a complete, <strong>100% free online PDF toolkit</strong> - all in one intuitive platform. Whether you need to <strong>merge PDFs</strong>, <strong>split documents</strong>, <strong>compress large files</strong>, <strong>convert PDFs</strong> to Word, Excel or JPG, <strong>rotate pages</strong>, <strong>unlock secured files</strong>, or <strong>add custom watermarks</strong>, you&apos;ll get professional - grade results in seconds. No installations, no subscriptions - just fast, secure, and easy PDF editing at your fingertips.
-                </p>
+        <main>
+            {/* Hero Section */}
+            <section className="relative overflow-hidden px-6 pb-16 pt-20 sm:pt-28">
+                {/* Subtle background gradient */}
+                <div
+                    className="absolute inset-0 -z-10 bg-gradient-to-b from-red-50/40 via-white to-white"
+                    aria-hidden="true"
+                />
+
+                <div className="container mx-auto max-w-3xl text-center">
+                    <h1 className="font-montserrat text-4xl font-bold tracking-tight text-stone-900 sm:text-5xl lg:text-6xl">
+                        Every PDF tool you need,{' '}
+                        <span className="text-red-600">completely free</span>
+                    </h1>
+
+                    <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-stone-500 sm:text-lg">
+                        Merge, split, compress, convert, rotate, unlock and watermark PDFs.
+                        All in your browser, no installation or signup needed.
+                    </p>
+                </div>
+
+                {/* Value props */}
+                <div className="container mx-auto mt-14 grid max-w-4xl gap-6 sm:grid-cols-3">
+                    {VALUE_PROPS.map(({ icon: Icon, title, text }) => (
+                        <div
+                            key={title}
+                            className="flex flex-col items-center text-center"
+                        >
+                            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-stone-100">
+                                <Icon className="h-5 w-5 text-stone-600" aria-hidden="true" />
+                            </div>
+                            <h2 className="mt-3 text-sm font-semibold text-stone-900">
+                                {title}
+                            </h2>
+                            <p className="mt-1 text-sm leading-relaxed text-stone-500">
+                                {text}
+                            </p>
+                        </div>
+                    ))}
+                </div>
             </section>
 
-            <FeatureGrid items={FEATURES} />
-        </div>
-    )
+            {/* Tools Grid */}
+            <section
+                id="tools"
+                className="scroll-mt-20 px-6 pb-20"
+                aria-labelledby="tools-heading"
+            >
+                <div className="container mx-auto max-w-7xl">
+                    <h2
+                        id="tools-heading"
+                        className="mb-8 text-center font-montserrat text-2xl font-bold text-stone-900 sm:text-3xl"
+                    >
+                        All PDF Tools
+                    </h2>
+
+                    <FeatureGrid items={FEATURES} />
+                </div>
+            </section>
+        </main>
+    );
 }

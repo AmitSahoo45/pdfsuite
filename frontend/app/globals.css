@@ -4,7 +4,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --font-sans: var(--font-bebas-neue);
+  --font-sans: var(--font-montserrat), ui-sans-serif, system-ui, sans-serif;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.147 0.004 49.25);
@@ -77,19 +77,31 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-.font-bebas {
-  font-family: var(--font-bebas-neue), sans-serif;
-}
-
 .font-montserrat {
   font-family: var(--font-montserrat), sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
   padding: 0;
-  box-sizing: border-box;
-  /* font-family: var(--font-bebas-neue); */
+}
+
+/* Smooth scroll for anchor links */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Focus visible for accessibility */
+:focus-visible {
+  outline: 2px solid oklch(0.577 0.245 27.325);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .dark {
