@@ -9,7 +9,7 @@ type Feature = {
 
 interface WorkerResponse {
     success: boolean;
-    url: string;
+    url?: string;
     error?: string;
 }
 

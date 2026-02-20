@@ -57,18 +57,20 @@ import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 const pdfjsVersion = '5.2.133';
 GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`;
 
-const fallbackImageUrl = '/assets/placeholder-preview.svg';
-
 self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
     let pdf = null;
     let objectUrl: string | null = null;
 
     try {
+        const buffer = e.data;
+        if (!(buffer instanceof ArrayBuffer))
+            throw new Error('Preview request payload is invalid.');
+
         if (typeof OffscreenCanvas === 'undefined')
             throw new Error('OffscreenCanvas is not supported in this worker.');
 
         pdf = await getDocument({ 
-            data: e.data,
+            data: buffer,
             useSystemFonts: true /* test fix - RCHK */
         }).promise;
 
@@ -102,7 +104,7 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
             throw new Error('Failed to convert canvas to Blob.');
 
         objectUrl = URL.createObjectURL(blob);
-        postMessage({ success: true, url: objectUrl });
+        postMessage({ success: true, url: objectUrl } satisfies WorkerResponse);
 
     } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
@@ -110,7 +112,7 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
         if (objectUrl) 
             URL.revokeObjectURL(objectUrl);
         
-        postMessage({ success: false, error: errorMsg, url: fallbackImageUrl });
+        postMessage({ success: false, error: errorMsg } satisfies WorkerResponse);
     } finally {
         pdf?.destroy();
     }
@@ -118,7 +120,6 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
 
 self.onerror = (event) => {
     console.log("Unhandled worker error:", event);
-    postMessage({ success: false, error: 'Unhandled worker error', url: fallbackImageUrl });
 };
 
 export { };

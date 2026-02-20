@@ -1,101 +1,114 @@
 let worker: Worker | null = null;
 let isWorkerBusy = false;
+let activeRequest: PreviewRequest | null = null;
 const requestQueue: PreviewRequest[] = [];
+export const FALLBACK_PREVIEW_URL = '/assets/placeholder-preview.svg';
+
+const releaseBlobUrl = (url?: string) => {
+    if (url?.startsWith('blob:'))
+        URL.revokeObjectURL(url);
+};
+
+const terminateWorker = () => {
+    if (!worker) return;
+    worker.terminate();
+    worker = null;
+};
+
+const rejectActiveRequest = (reason: unknown) => {
+    if (!activeRequest) return;
+    activeRequest.reject(reason);
+    activeRequest = null;
+};
 
 const getWorker = (): Worker => {
     if (!worker) {
-        worker = new Worker(new URL('../worker/preview.worker.ts', import.meta.url), { type: 'module', /*name: 'pdf-preview-worker' << ---- Todo: re-visit doc  */ });
+        worker = new Worker(new URL('../worker/preview.worker.ts', import.meta.url), { type: 'module' });
 
         worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-            isWorkerBusy = false;
             const response = event.data;
-            const processedRequest = requestQueue.shift();
 
-            if (processedRequest) {
-                if (response.success)
-                    processedRequest.resolve(response.url);
-                else
-                    processedRequest.reject(new Error(response.error || 'Preview worker failed'));
-            } else {
-                console.warn("Worker message received but no matching request found in queue.");
-
-                if (response.success && response.url.startsWith('blob:'))
-                    URL.revokeObjectURL(response.url);
+            if (!activeRequest) {
+                console.warn('Worker response received without an active request.');
+                releaseBlobUrl(response.url);
+                return;
             }
+
+            const completedRequest = activeRequest;
+            activeRequest = null;
+            isWorkerBusy = false;
+
+            if (response.success && response.url)
+                completedRequest.resolve(response.url);
+            else
+                completedRequest.resolve(FALLBACK_PREVIEW_URL);
 
             processQueue();
         };
 
         worker.onerror = (error) => {
-            console.error('Unhandled Preview Worker error:', error);
-            isWorkerBusy = false;
-            const processedRequest = requestQueue.shift();
-
-            if (processedRequest) {
-                // processedRequest.reject(error); << ----- Todo: check with reject
-                // processedRequest.resolve('/assets/placeholder-preview.svg'); // old code
-                processedRequest.reject(error);
+            console.error('Unhandled preview worker error:', error);
+            if (activeRequest) {
+                activeRequest.resolve(FALLBACK_PREVIEW_URL);
+                activeRequest = null;
             }
-
-            worker?.terminate();
-            worker = null;
             isWorkerBusy = false;
-
-            while (requestQueue.length > 0) {
-                const req = requestQueue.shift();
-                req?.resolve('/assets/placeholder-preview.svg'); // Resolve pending with fallback
-                // req?.reject(new Error("Worker failed during processing.")); <<< Todo: check with reject
-            }
+            terminateWorker();
+            processQueue();
         };
     }
+
     return worker;
 };
-
 
 const processQueue = () => {
     if (isWorkerBusy || requestQueue.length === 0)
         return;
 
-    isWorkerBusy = true;
-    const request = requestQueue[0];
+    const nextRequest = requestQueue.shift();
+    if (!nextRequest) return;
 
-    request.file.arrayBuffer()
-        .then(buffer => {
+    isWorkerBusy = true;
+    activeRequest = nextRequest;
+
+    nextRequest.file.arrayBuffer()
+        .then((buffer) => {
             const workerInstance = getWorker();
             workerInstance.postMessage(buffer, [buffer]);
         })
-        .catch(error => {
-            console.error("Error reading file for preview:", error);
+        .catch((error) => {
+            console.error('Error reading file for preview:', error);
+            if (activeRequest) {
+                activeRequest.resolve(FALLBACK_PREVIEW_URL);
+                activeRequest = null;
+            }
             isWorkerBusy = false;
-            const failedRequest = requestQueue.shift();
-            failedRequest?.resolve('/assets/placeholder-preview.svg');
-            // failedRequest?.reject(error);
-            processQueue(); // Try next request
+            processQueue();
         });
 };
 
 /**
  * Generates a preview image URL for the first page of a PDF file.
  * Uses a shared Web Worker to offload the processing.
- * @param file The PDF file object.
- * @returns A Promise that resolves with the preview image URL (a blob URL or a fallback URL).
  */
 export const generatePdfPreview = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
-        requestQueue.push({ file, resolve, reject });
-
-        if (!isWorkerBusy)
-            processQueue();
+        requestQueue.push({
+            file,
+            resolve,
+            reject,
+        });
+        processQueue();
     });
 };
 
-// Todo : Is it required to have a cleanup function? Review required.
 export const cleanupPdfPreviewWorker = () => {
-    if (worker) {
-        console.log('Terminating Preview Worker...');
-        worker.terminate();
-        worker = null;
-        isWorkerBusy = false;
-        requestQueue.length = 0;
+    terminateWorker();
+    isWorkerBusy = false;
+    rejectActiveRequest(new Error('Preview generation cancelled.'));
+
+    while (requestQueue.length > 0) {
+        const req = requestQueue.shift();
+        req?.reject(new Error('Preview generation cancelled.'));
     }
 };

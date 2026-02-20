@@ -12,7 +12,11 @@ import {
 
 import { MAX_FILES, MAX_FILE_SIZE_MB } from '@/constants';
 import { FileMetaSchema, type FileMeta } from '@/hook/fileMeta';
-import { generatePdfPreview, cleanupPdfPreviewWorker } from '@/service/pdfPreviewService';
+import {
+    generatePdfPreview,
+    cleanupPdfPreviewWorker,
+    FALLBACK_PREVIEW_URL,
+} from '@/service/pdfPreviewService';
 import { debounce, uuid } from '@/lib/utils';
 
 export interface UsePdfFilesOptions {
@@ -77,7 +81,6 @@ export function usePdfFiles(options?: UsePdfFilesOptions) {
                 );
                 files = files.slice(0, maxFiles - pdfFiles.length);
                 if (files.length === 0) return;
-                return;
             }
 
             setIsGeneratingPreviews(true);
@@ -107,8 +110,8 @@ export function usePdfFiles(options?: UsePdfFilesOptions) {
                         previewUrl = await generatePdfPreview(file);
                     } catch (err) {
                         console.error(`Preview failed for ${file.name}:`, err);
-                        toast.error(`Failed generating preview for ${file.name}.`);
-                        continue;
+                        previewUrl = FALLBACK_PREVIEW_URL;
+                        toast.error(`Couldn't generate preview for ${file.name}. Using placeholder.`);
                     }
 
                     const meta: Omit<FileMeta, 'id'> = {
