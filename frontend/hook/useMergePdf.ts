@@ -1,33 +1,42 @@
 'use client';
+
 import {
     useCallback,
     useEffect,
+    useRef,
     useState,
     type Dispatch,
     type SetStateAction,
 } from 'react';
-import { degrees, PDFDocument } from 'pdf-lib';
 import toast from 'react-hot-toast';
+
+import { createBlobUrlFromBytes } from '@/lib/blobUrls';
+import { useManagedToolResult } from '@/hook/useManagedToolResult';
 import type { FileMeta } from '@/hook/fileMeta';
+import { isAbortError } from '@/service/processing';
+import { mergePdfFiles } from '@/service/pdfMergeService';
 
 interface UseMergePdfOptions {
     pdfFiles: FileMeta[];
     setIsLoading: Dispatch<SetStateAction<boolean>>;
 }
 
-const revokeBlobUrl = (url: string | null) => {
-    if (url?.startsWith('blob:'))
-        URL.revokeObjectURL(url);
-};
-
 export function useMergePdf({ pdfFiles, setIsLoading }: UseMergePdfOptions) {
-    const [mergedPdfUrl, setMergedPdfUrl] = useState<string | null>(null);
+    const { result, setResult, clearResult } = useManagedToolResult();
+    const [progressPercent, setProgressPercent] = useState(0);
+    const [progressLabel, setProgressLabel] = useState('Idle');
+    const abortControllerRef = useRef<AbortController | null>(null);
+
+    const cancelProcessing = useCallback(() => {
+        abortControllerRef.current?.abort();
+    }, []);
 
     useEffect(() => {
         return () => {
-            revokeBlobUrl(mergedPdfUrl);
+            abortControllerRef.current?.abort();
+            abortControllerRef.current = null;
         };
-    }, [mergedPdfUrl]);
+    }, []);
 
     const handleMergePdfs = useCallback(async () => {
         if (pdfFiles.length < 2) {
@@ -35,56 +44,75 @@ export function useMergePdf({ pdfFiles, setIsLoading }: UseMergePdfOptions) {
             return;
         }
 
+        abortControllerRef.current?.abort();
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+
         setIsLoading(true);
-        revokeBlobUrl(mergedPdfUrl);
-        setMergedPdfUrl(null);
+        setProgressPercent(0);
+        setProgressLabel('Preparing merge...');
+        clearResult();
 
         try {
-            const mergedPdf = await PDFDocument.create();
+            const mergeResult = await mergePdfFiles({
+                files: pdfFiles,
+                signal: controller.signal,
+                onProgress: ({ completed, total, currentFileName }) => {
+                    if (abortControllerRef.current !== controller) return;
+                    const nextProgress = total > 0
+                        ? Math.min(100, Math.round((completed / total) * 100))
+                        : 0;
+                    setProgressPercent(nextProgress);
+                    setProgressLabel(currentFileName
+                        ? `Merging ${currentFileName}`
+                        : 'Merging PDFs...');
+                },
+            });
 
-            for (const fileMeta of pdfFiles) {
-                try {
-                    const pdfBytes = await fileMeta.file.arrayBuffer();
-                    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+            if (abortControllerRef.current !== controller) return;
 
-                    const indices = doc.getPageIndices();
-                    if (indices.length === 0) continue;
+            mergeResult.warnings.forEach((warning) => {
+                toast.error(`Skipping ${warning.fileName}: ${warning.message}`);
+            });
 
-                    const copiedPages = await mergedPdf.copyPages(doc, indices);
-                    copiedPages.forEach((page) => {
-                        const originalRotation = page.getRotation().angle;
-                        page.setRotation(degrees((originalRotation + fileMeta.rotation) % 360));
-                        mergedPdf.addPage(page);
-                    });
-                } catch (loadError) {
-                    console.log(`Error processing ${fileMeta.name}:`, loadError);
-                    toast.error(`Skipping ${fileMeta.name} due to an error during processing.`);
-                }
-            }
+            const blobInfo = createBlobUrlFromBytes(mergeResult.bytes, 'application/pdf');
+            setResult({
+                kind: 'single',
+                modeLabel: 'Merge PDF',
+                file: {
+                    url: blobInfo.url,
+                    filename: 'merged_document.pdf',
+                    mimeType: 'application/pdf',
+                    sizeBytes: blobInfo.sizeBytes,
+                },
+            });
 
-            if (mergedPdf.getPageCount() === 0)
-                throw new Error('No pages could be added to the merged document. Check input files.');
-
-            const mergedPdfBytes = await mergedPdf.save();
-            const arrayBuffer = new ArrayBuffer(mergedPdfBytes.byteLength);
-            new Uint8Array(arrayBuffer).set(mergedPdfBytes);
-
-            const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
-            const url = URL.createObjectURL(blob);
-
-            setMergedPdfUrl(url);
+            setProgressPercent(100);
+            setProgressLabel('Merge completed');
             toast.success('PDFs merged successfully!');
         } catch (error) {
+            if (isAbortError(error)) {
+                if (abortControllerRef.current === controller)
+                    toast('Merge cancelled.');
+                return;
+            }
+
             console.error('Error merging PDFs:', error);
             toast.error(`Merge failed: ${error instanceof Error ? error.message : String(error)}`);
-            setMergedPdfUrl(null);
+            setResult(null);
         } finally {
-            setIsLoading(false);
+            if (abortControllerRef.current === controller) {
+                abortControllerRef.current = null;
+                setIsLoading(false);
+            }
         }
-    }, [pdfFiles, setIsLoading, mergedPdfUrl]);
+    }, [clearResult, pdfFiles, setIsLoading, setResult]);
 
     return {
-        mergedPdfUrl,
+        result,
+        progressPercent,
+        progressLabel,
+        cancelProcessing,
         handleMergePdfs,
     };
 }

@@ -9,7 +9,7 @@ import PdfToolLayout from '@/components/layout/PdfToolLayout';
 
 const MergePDF = () => {
     const pdf = usePdfFiles();
-    const { mergedPdfUrl, handleMergePdfs } = useMergePdf({
+    const merge = useMergePdf({
         pdfFiles: pdf.pdfFiles,
         setIsLoading: pdf.setIsLoading,
     });
@@ -20,12 +20,15 @@ const MergePDF = () => {
             description="Combine PDFs in the order you want with the easiest PDF merger available."
             actionLabel="Merge PDF"
             actionIcon={<Merge className="h-5 w-5" />}
-            onAction={handleMergePdfs}
+            onAction={merge.handleMergePdfs}
             actionDisabled={pdf.pdfFiles.length < 2}
             dropzone={pdf.dropzone}
             files={pdf.pdfFiles}
             isProcessing={pdf.isLoading}
             isGeneratingPreviews={pdf.isGeneratingPreviews}
+            progressPercent={merge.progressPercent}
+            progressLabel={merge.progressLabel}
+            onCancelProcessing={merge.cancelProcessing}
             fileLimits={pdf.fileLimits}
             onRemoveFile={pdf.handleRemoveFile}
             onRotate={pdf.handleRotate}
@@ -36,8 +39,7 @@ const MergePDF = () => {
                 sensors: pdf.sensors,
                 handleDragEnd: pdf.handleDragEnd,
             }}
-            resultUrl={mergedPdfUrl}
-            resultFilename="merged_document.pdf"
+            result={merge.result}
         />
     );
 };

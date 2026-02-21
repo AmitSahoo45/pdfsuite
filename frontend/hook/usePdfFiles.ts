@@ -17,6 +17,7 @@ import {
     cleanupPdfPreviewWorker,
     FALLBACK_PREVIEW_URL,
 } from '@/service/pdfPreviewService';
+import { revokeBlobUrl } from '@/lib/blobUrls';
 import { debounce, uuid } from '@/lib/utils';
 
 export interface UsePdfFilesOptions {
@@ -187,9 +188,7 @@ export function usePdfFiles(options?: UsePdfFilesOptions) {
     const handleRemoveFile = useCallback((id: string) => {
         setPdfFiles((prevFiles) => {
             const fileToRemove = prevFiles.find((f) => f.id === id);
-            if (fileToRemove?.previewImageUrl.startsWith('blob:')) {
-                URL.revokeObjectURL(fileToRemove.previewImageUrl);
-            }
+            revokeBlobUrl(fileToRemove?.previewImageUrl);
             return prevFiles.filter((p) => p.id !== id);
         });
         setSortingOrder(null);
@@ -198,9 +197,7 @@ export function usePdfFiles(options?: UsePdfFilesOptions) {
     // ── Clear all files ──────────────────────────────────────────────────
     const handleClearFiles = useCallback(() => {
         pdfFiles.forEach((f) => {
-            if (f.previewImageUrl.startsWith('blob:')) {
-                URL.revokeObjectURL(f.previewImageUrl);
-            }
+            revokeBlobUrl(f.previewImageUrl);
         });
         setPdfFiles([]);
         setSortingOrder(null);

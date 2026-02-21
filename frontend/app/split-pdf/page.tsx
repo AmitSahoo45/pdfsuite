@@ -185,6 +185,9 @@ const SplitPDF = () => {
             files={pdf.pdfFiles}
             isProcessing={pdf.isLoading}
             isGeneratingPreviews={pdf.isGeneratingPreviews}
+            progressPercent={split.progressPercent}
+            progressLabel={split.progressLabel}
+            onCancelProcessing={split.cancelProcessing}
             fileLimits={pdf.fileLimits}
             onRemoveFile={pdf.handleRemoveFile}
             onRotate={pdf.handleRotate}
@@ -195,10 +198,7 @@ const SplitPDF = () => {
                 sensors: pdf.sensors,
                 handleDragEnd: pdf.handleDragEnd,
             }}
-            resultUrl={split.resultUrl}
-            resultFilename={split.resultFilename}
-            resultFiles={split.resultFiles}
-            zipResult={split.zipResult}
+            result={split.result}
             sidebar={splitSidebar}
         />
     );

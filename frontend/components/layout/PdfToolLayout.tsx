@@ -5,10 +5,10 @@ import type { DragEndEvent } from '@dnd-kit/core';
 
 import type { FileMeta } from '@/hook/fileMeta';
 import type { PdfDndSensors, PdfDropzone } from '@/hook/usePdfFiles';
+import type { ToolResult } from '@/types/toolResult';
 import UploadPhase from './UploadPhase';
 import WorkPhase from './WorkPhase';
 import BottomActionBar from './BottomActionBar';
-import type { DownloadableResult } from './BottomActionBar';
 
 interface PdfToolLayoutProps {
     title: string;
@@ -23,6 +23,9 @@ interface PdfToolLayoutProps {
 
     isProcessing: boolean;
     isGeneratingPreviews: boolean;
+    progressPercent?: number;
+    progressLabel?: string;
+    onCancelProcessing?: () => void;
 
     fileLimits: {
         maxFiles: number;
@@ -40,10 +43,7 @@ interface PdfToolLayoutProps {
         handleDragEnd: (event: DragEndEvent) => void;
     };
 
-    resultUrl?: string | null;
-    resultFilename?: string;
-    resultFiles?: DownloadableResult[];
-    zipResult?: DownloadableResult | null;
+    result?: ToolResult | null;
     sidebar?: React.ReactNode;
     fileCardRenderer?: (file: FileMeta) => React.ReactNode;
 }
@@ -59,6 +59,9 @@ const PdfToolLayout: React.FC<PdfToolLayoutProps> = ({
     files,
     isProcessing,
     isGeneratingPreviews,
+    progressPercent,
+    progressLabel,
+    onCancelProcessing,
     fileLimits,
     onRemoveFile,
     onRotate,
@@ -66,10 +69,7 @@ const PdfToolLayout: React.FC<PdfToolLayoutProps> = ({
     onSortByName,
     sortingOrder,
     dndProps,
-    resultUrl,
-    resultFilename,
-    resultFiles,
-    zipResult,
+    result,
     sidebar,
     fileCardRenderer,
 }) => {
@@ -125,10 +125,10 @@ const PdfToolLayout: React.FC<PdfToolLayoutProps> = ({
                         onAction={onAction}
                         actionDisabled={actionDisabled}
                         isProcessing={isProcessing}
-                        resultUrl={resultUrl}
-                        resultFilename={resultFilename}
-                        resultFiles={resultFiles}
-                        zipResult={zipResult}
+                        result={result}
+                        progressPercent={progressPercent}
+                        progressLabel={progressLabel}
+                        onCancelProcessing={onCancelProcessing}
                     />
                 </>
             )}
