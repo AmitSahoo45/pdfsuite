@@ -8,6 +8,7 @@ import type { PdfDndSensors, PdfDropzone } from '@/hook/usePdfFiles';
 import UploadPhase from './UploadPhase';
 import WorkPhase from './WorkPhase';
 import BottomActionBar from './BottomActionBar';
+import type { DownloadableResult } from './BottomActionBar';
 
 interface PdfToolLayoutProps {
     title: string;
@@ -41,6 +42,7 @@ interface PdfToolLayoutProps {
 
     resultUrl?: string | null;
     resultFilename?: string;
+    resultFiles?: DownloadableResult[];
     sidebar?: React.ReactNode;
     fileCardRenderer?: (file: FileMeta) => React.ReactNode;
 }
@@ -65,6 +67,7 @@ const PdfToolLayout: React.FC<PdfToolLayoutProps> = ({
     dndProps,
     resultUrl,
     resultFilename,
+    resultFiles,
     sidebar,
     fileCardRenderer,
 }) => {
@@ -122,6 +125,7 @@ const PdfToolLayout: React.FC<PdfToolLayoutProps> = ({
                         isProcessing={isProcessing}
                         resultUrl={resultUrl}
                         resultFilename={resultFilename}
+                        resultFiles={resultFiles}
                     />
                 </>
             )}

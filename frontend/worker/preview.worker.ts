@@ -1,8 +1,9 @@
 /// <reference lib="webworker" />
 
-// Polyfill for OffscreenCanvas as some browser might need it explicitly
+// ─── Polyfills (MUST run before pdfjs-dist loads) ────────────────────────────
+
 if (typeof self.OffscreenCanvas === 'undefined') {
-    console.log('OffscreenCanvas not natively supported in this worker environment.');
+    console.warn('OffscreenCanvas not natively supported in this worker environment.');
     (self as any).OffscreenCanvas = class {
         width: number;
         height: number;
@@ -11,22 +12,20 @@ if (typeof self.OffscreenCanvas === 'undefined') {
             this.height = height;
         }
         getContext(_contextId: string): null {
-            console.log("OffscreenCanvas getContext is not polyfilled.");
+            console.warn("OffscreenCanvas getContext is not polyfilled.");
             return null;
         }
         convertToBlob(): Promise<Blob | null> {
-            console.log("OffscreenCanvas convertToBlob is not polyfilled.");
+            console.warn("OffscreenCanvas convertToBlob is not polyfilled.");
             return Promise.resolve(null);
         }
     };
 }
 
-
 if (!(self as any).document) {
-    // fix for Failed to load PDF document error : starts here
     const mockElement = {
         style: {},
-        remove: () => { console.log("Mock remove called"); }
+        remove: () => { },
     };
 
     const mockBodyOrHead = {
@@ -36,26 +35,34 @@ if (!(self as any).document) {
     };
 
     (self as any).document = {
-        createElement: (_: string) => {
-            if (typeof OffscreenCanvas !== 'undefined' && _?.toLocaleLowerCase() === 'canvas') /* <<< fix */
+        createElement: (tag: string) => {
+            if (typeof OffscreenCanvas !== 'undefined' && tag?.toLowerCase() === 'canvas')
                 return new OffscreenCanvas(1, 1);
-
-            console.log("Cannot create OffscreenCanvas for document stub.");
-            return null;
+            return mockElement;
         },
         head: mockBodyOrHead,
         body: mockBodyOrHead,
-        documentElement: { style: {} }, /* <<<< fix */
+        documentElement: { style: {} },
     };
-
-    // fix for Failed to load PDF document error : ends here
 }
 
+// ─── Lazy-loaded pdfjs (initialized once, after polyfills) ───────────────────
 
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
+let pdfjsReady: Promise<typeof import('pdfjs-dist')> | null = null;
 
-const pdfjsVersion = '5.2.133';
-GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`;
+function getPdfjs(): Promise<typeof import('pdfjs-dist')> {
+    if (!pdfjsReady) {
+        pdfjsReady = import('pdfjs-dist').then((pdfjs) => {
+            const pdfjsVersion = '5.2.133';
+            pdfjs.GlobalWorkerOptions.workerSrc =
+                `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`;
+            return pdfjs;
+        });
+    }
+    return pdfjsReady;
+}
+
+// ─── Message handler ─────────────────────────────────────────────────────────
 
 self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
     let pdf = null;
@@ -69,11 +76,12 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
         if (typeof OffscreenCanvas === 'undefined')
             throw new Error('OffscreenCanvas is not supported in this worker.');
 
-        pdf = await getDocument({ 
-            data: buffer,
-            useSystemFonts: true /* test fix - RCHK */
-        }).promise;
+        const { getDocument } = await getPdfjs();
 
+        pdf = await getDocument({
+            data: buffer,
+            useSystemFonts: true,
+        }).promise;
 
         if (pdf.numPages === 0)
             throw new Error('PDF has no pages.');
@@ -94,9 +102,11 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
         if (!ctx)
             throw new Error('Failed to get 2D context from OffscreenCanvas.');
 
-        await page.render({ canvasContext: ctx as unknown as CanvasRenderingContext2D, viewport: scaledViewport }).promise;
+        await page.render({
+            canvasContext: ctx as unknown as CanvasRenderingContext2D,
+            viewport: scaledViewport,
+        }).promise;
 
-        // Cleaning up page resources <<<<< fix : rchk
         page.cleanup();
 
         const blob = await offscreen.convertToBlob({ type: 'image/webp', quality: 0.8 });
@@ -108,10 +118,10 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
 
     } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        console.error(`Error in preview.worker :`, errorMsg, err); 
-        if (objectUrl) 
+        console.error('Error in preview.worker:', errorMsg, err);
+        if (objectUrl)
             URL.revokeObjectURL(objectUrl);
-        
+
         postMessage({ success: false, error: errorMsg } satisfies WorkerResponse);
     } finally {
         pdf?.destroy();
@@ -119,7 +129,7 @@ self.onmessage = async (e: MessageEvent<ArrayBuffer>) => {
 };
 
 self.onerror = (event) => {
-    console.log("Unhandled worker error:", event);
+    console.error("Unhandled worker error:", event);
 };
 
 export { };
