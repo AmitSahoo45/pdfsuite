@@ -198,6 +198,7 @@ const SplitPDF = () => {
             resultUrl={split.resultUrl}
             resultFilename={split.resultFilename}
             resultFiles={split.resultFiles}
+            zipResult={split.zipResult}
             sidebar={splitSidebar}
         />
     );

@@ -17,6 +17,7 @@ interface BottomActionBarProps {
     resultUrl?: string | null;
     resultFilename?: string;
     resultFiles?: DownloadableResult[];
+    zipResult?: DownloadableResult | null;
 }
 
 const BottomActionBar: React.FC<BottomActionBarProps> = ({
@@ -28,15 +29,16 @@ const BottomActionBar: React.FC<BottomActionBarProps> = ({
     resultUrl,
     resultFilename = 'output.pdf',
     resultFiles,
+    zipResult,
 }) => {
-    const downloads = resultFiles && resultFiles.length > 0
+    const pdfDownloads = resultFiles && resultFiles.length > 0
         ? resultFiles
         : resultUrl
             ? [{ url: resultUrl, filename: resultFilename }]
             : [];
 
-    const handleDownloadAll = () => {
-        downloads.forEach((file) => {
+    const handleDownloadPdfs = () => {
+        pdfDownloads.forEach((file) => {
             const link = document.createElement('a');
             link.href = file.url;
             link.download = file.filename;
@@ -68,27 +70,39 @@ const BottomActionBar: React.FC<BottomActionBarProps> = ({
                     )}
                 </button>
 
-                {/* Download button(s) (appear after processing) */}
-                {downloads.length === 1 && !isProcessing && (
+                {/* PDF download buttons */}
+                {pdfDownloads.length === 1 && !isProcessing && (
                     <a
-                        href={downloads[0].url}
-                        download={downloads[0].filename}
-                        className="flex items-center gap-2 rounded-xl bg-green-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-green-700 hover:shadow-lg active:scale-[0.98]"
+                        href={pdfDownloads[0].url}
+                        download={pdfDownloads[0].filename}
+                        className="flex items-center gap-2 rounded-xl bg-sky-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-sky-700 hover:shadow-lg active:scale-[0.98]"
                     >
                         <Download className="h-5 w-5" />
-                        Download
+                        Download PDF
                     </a>
                 )}
 
-                {downloads.length > 1 && !isProcessing && (
+                {pdfDownloads.length > 1 && !isProcessing && (
                     <button
                         type="button"
-                        onClick={handleDownloadAll}
+                        onClick={handleDownloadPdfs}
+                        className="flex items-center gap-2 rounded-xl bg-sky-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-sky-700 hover:shadow-lg active:scale-[0.98]"
+                    >
+                        <Download className="h-5 w-5" />
+                        Download PDFs ({pdfDownloads.length})
+                    </button>
+                )}
+
+                {/* ZIP download button */}
+                {zipResult && !isProcessing && (
+                    <a
+                        href={zipResult.url}
+                        download={zipResult.filename}
                         className="flex items-center gap-2 rounded-xl bg-green-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-green-700 hover:shadow-lg active:scale-[0.98]"
                     >
                         <Download className="h-5 w-5" />
-                        Download All ({downloads.length})
-                    </button>
+                        Download ZIP
+                    </a>
                 )}
             </div>
         </div>

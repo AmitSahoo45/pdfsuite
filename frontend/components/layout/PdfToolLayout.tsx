@@ -43,6 +43,7 @@ interface PdfToolLayoutProps {
     resultUrl?: string | null;
     resultFilename?: string;
     resultFiles?: DownloadableResult[];
+    zipResult?: DownloadableResult | null;
     sidebar?: React.ReactNode;
     fileCardRenderer?: (file: FileMeta) => React.ReactNode;
 }
@@ -68,6 +69,7 @@ const PdfToolLayout: React.FC<PdfToolLayoutProps> = ({
     resultUrl,
     resultFilename,
     resultFiles,
+    zipResult,
     sidebar,
     fileCardRenderer,
 }) => {
@@ -126,6 +128,7 @@ const PdfToolLayout: React.FC<PdfToolLayoutProps> = ({
                         resultUrl={resultUrl}
                         resultFilename={resultFilename}
                         resultFiles={resultFiles}
+                        zipResult={zipResult}
                     />
                 </>
             )}
