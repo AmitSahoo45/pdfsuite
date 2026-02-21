@@ -5,10 +5,11 @@ import type { DragEndEvent } from '@dnd-kit/core';
 
 import type { FileMeta } from '@/hook/fileMeta';
 import type { PdfDndSensors, PdfDropzone } from '@/hook/usePdfFiles';
-import type { ToolResult } from '@/types/toolResult';
+import type { ToolResult, ToolSummary } from '@/types/toolResult';
 import UploadPhase from './UploadPhase';
 import WorkPhase from './WorkPhase';
 import BottomActionBar from './BottomActionBar';
+import ResultSummaryPanel from './ResultSummaryPanel';
 
 interface PdfToolLayoutProps {
     title: string;
@@ -44,6 +45,7 @@ interface PdfToolLayoutProps {
     };
 
     result?: ToolResult | null;
+    summary?: ToolSummary | null;
     sidebar?: React.ReactNode;
     fileCardRenderer?: (file: FileMeta) => React.ReactNode;
 }
@@ -70,6 +72,7 @@ const PdfToolLayout: React.FC<PdfToolLayoutProps> = ({
     sortingOrder,
     dndProps,
     result,
+    summary,
     sidebar,
     fileCardRenderer,
 }) => {
@@ -115,6 +118,7 @@ const PdfToolLayout: React.FC<PdfToolLayoutProps> = ({
                         isGeneratingPreviews={isGeneratingPreviews}
                         sensors={dndProps.sensors}
                         handleDragEnd={dndProps.handleDragEnd}
+                        topPanel={summary ? <ResultSummaryPanel summary={summary} isProcessing={isProcessing} /> : null}
                         sidebar={sidebar}
                         fileCardRenderer={fileCardRenderer}
                     />

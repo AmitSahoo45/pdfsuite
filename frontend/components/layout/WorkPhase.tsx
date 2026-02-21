@@ -11,6 +11,7 @@ import type { PdfDndSensors } from '@/hook/usePdfFiles';
 
 interface WorkPhaseProps {
     files: FileMeta[];
+    topPanel?: React.ReactNode;
 
     // File operations
     onRemoveFile: (id: string) => void;
@@ -37,6 +38,7 @@ interface WorkPhaseProps {
 
 const WorkPhase: React.FC<WorkPhaseProps> = ({
     files,
+    topPanel,
     onRemoveFile,
     onRotate,
     onClearFiles,
@@ -144,6 +146,11 @@ const WorkPhase: React.FC<WorkPhaseProps> = ({
                     {isGeneratingPreviews && (
                         <div className="mb-4 animate-pulse text-center text-sm text-indigo-600">
                             Generating previews...
+                        </div>
+                    )}
+                    {topPanel && (
+                        <div className="mb-4">
+                            {topPanel}
                         </div>
                     )}
 

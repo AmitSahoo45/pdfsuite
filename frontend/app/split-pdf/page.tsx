@@ -199,6 +199,7 @@ const SplitPDF = () => {
                 handleDragEnd: pdf.handleDragEnd,
             }}
             result={split.result}
+            summary={split.summary}
             sidebar={splitSidebar}
         />
     );

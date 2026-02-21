@@ -40,6 +40,7 @@ const MergePDF = () => {
                 handleDragEnd: pdf.handleDragEnd,
             }}
             result={merge.result}
+            summary={merge.summary}
         />
     );
 };

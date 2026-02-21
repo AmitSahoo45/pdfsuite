@@ -3,6 +3,7 @@
 import {
     useCallback,
     useEffect,
+    useMemo,
     useRef,
     useState,
     type Dispatch,
@@ -11,10 +12,12 @@ import {
 import toast from 'react-hot-toast';
 
 import { createBlobUrlFromBytes } from '@/lib/blobUrls';
+import { summarizeToolResult } from '@/lib/toolSummary';
 import { useManagedToolResult } from '@/hook/useManagedToolResult';
 import type { FileMeta } from '@/hook/fileMeta';
 import { isAbortError } from '@/service/processing';
 import { mergePdfFiles } from '@/service/pdfMergeService';
+import type { ToolSummary } from '@/types/toolResult';
 
 interface UseMergePdfOptions {
     pdfFiles: FileMeta[];
@@ -108,8 +111,33 @@ export function useMergePdf({ pdfFiles, setIsLoading }: UseMergePdfOptions) {
         }
     }, [clearResult, pdfFiles, setIsLoading, setResult]);
 
+    const summary = useMemo<ToolSummary | null>(() => {
+        if (result)
+            return summarizeToolResult(result);
+
+        if (pdfFiles.length === 0)
+            return null;
+
+        const estimatedSize = pdfFiles.reduce((sum, file) => sum + file.size, 0);
+        const outputReady = pdfFiles.length >= 2;
+
+        return {
+            phase: 'planned',
+            modeLabel: 'Merge PDF',
+            outputCount: outputReady ? 1 : 0,
+            outputNames: outputReady ? ['merged_document.pdf'] : [],
+            totalSizeBytes: outputReady ? estimatedSize : null,
+            isEstimatedSize: true,
+            zipAvailable: false,
+            note: outputReady
+                ? 'Estimated size is based on source files and may differ in output.'
+                : 'Add at least two PDF files to generate merged output.',
+        };
+    }, [pdfFiles, result]);
+
     return {
         result,
+        summary,
         progressPercent,
         progressLabel,
         cancelProcessing,

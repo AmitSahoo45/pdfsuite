@@ -55,69 +55,106 @@ const BottomActionBar: React.FC<BottomActionBarProps> = ({
         }
     }
 
+    const showDownloads = !isProcessing && (pdfDownloads.length > 0 || Boolean(zipDownload));
+    const hasBothDownloadOptions = !isProcessing && pdfDownloads.length > 0 && Boolean(zipDownload);
+    const safeProgressPercent = Math.min(100, Math.max(0, progressPercent));
+
+    const pdfDownloadLabel = pdfDownloads.length <= 1
+        ? 'Download PDF'
+        : `Download PDFs (${pdfDownloads.length})`;
+
     return (
         <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/95 backdrop-blur-sm">
-            <div className="container mx-auto flex items-center justify-center gap-3 px-4 py-3">
-                <button
-                    onClick={onAction}
-                    disabled={actionDisabled || isProcessing}
-                    className="flex items-center gap-2 rounded-xl bg-red-500 px-8 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-red-600 hover:shadow-lg active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                    {isProcessing ? (
-                        <>
-                            <Loader2 className="h-5 w-5 animate-spin" />
-                            {progressLabel || `Processing... ${progressPercent}%`}
-                        </>
-                    ) : (
-                        <>
-                            {actionIcon}
-                            {actionLabel}
-                        </>
+            <div className="container mx-auto flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-center sm:gap-3">
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                    <button
+                        onClick={onAction}
+                        disabled={actionDisabled || isProcessing}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-500 px-8 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-red-600 hover:shadow-lg active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                    >
+                        {isProcessing ? (
+                            <>
+                                <Loader2 className="h-5 w-5 animate-spin" />
+                                {progressLabel || `Processing... ${safeProgressPercent}%`}
+                            </>
+                        ) : (
+                            <>
+                                {actionIcon}
+                                {actionLabel}
+                            </>
+                        )}
+                    </button>
+
+                    {isProcessing && onCancelProcessing && (
+                        <button
+                            type="button"
+                            onClick={onCancelProcessing}
+                            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 sm:w-auto"
+                        >
+                            <X className="h-4 w-4" />
+                            Cancel
+                        </button>
                     )}
-                </button>
+                </div>
 
-                {isProcessing && onCancelProcessing && (
-                    <button
-                        type="button"
-                        onClick={onCancelProcessing}
-                        className="flex items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
-                    >
-                        <X className="h-4 w-4" />
-                        Cancel
-                    </button>
+                {isProcessing && (
+                    <div className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 sm:w-64">
+                        <div className="mb-1 flex items-center justify-between text-xs font-medium text-gray-600">
+                            <span>{progressLabel || 'Processing PDFs...'}</span>
+                            <span>{safeProgressPercent}%</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-gray-200">
+                            <div
+                                className="h-full rounded-full bg-red-500 transition-all duration-300"
+                                style={{ width: `${safeProgressPercent}%` }}
+                            />
+                        </div>
+                    </div>
                 )}
 
-                {pdfDownloads.length === 1 && !isProcessing && (
-                    <a
-                        href={pdfDownloads[0].url}
-                        download={pdfDownloads[0].filename}
-                        className="flex items-center gap-2 rounded-xl bg-sky-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-sky-700 hover:shadow-lg active:scale-[0.98]"
-                    >
-                        <Download className="h-5 w-5" />
-                        Download PDF
-                    </a>
-                )}
+                {showDownloads && (
+                    <div className="w-full sm:w-auto">
+                        {hasBothDownloadOptions && (
+                            <p className="mb-1 text-xs text-gray-500 sm:hidden">
+                                Choose download format
+                            </p>
+                        )}
 
-                {pdfDownloads.length > 1 && !isProcessing && (
-                    <button
-                        type="button"
-                        onClick={() => pdfDownloads.forEach((file) => triggerDownload(file))}
-                        className="flex items-center gap-2 rounded-xl bg-sky-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-sky-700 hover:shadow-lg active:scale-[0.98]"
-                    >
-                        <Download className="h-5 w-5" />
-                        Download PDFs ({pdfDownloads.length})
-                    </button>
-                )}
+                        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                            {pdfDownloads.length === 1 && (
+                                <a
+                                    href={pdfDownloads[0].url}
+                                    download={pdfDownloads[0].filename}
+                                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-sky-700 hover:shadow-lg active:scale-[0.98] sm:w-auto"
+                                >
+                                    <Download className="h-5 w-5" />
+                                    {pdfDownloadLabel}
+                                </a>
+                            )}
 
-                {zipDownload && !isProcessing && (
-                    <a
-                        href={zipDownload.url}
-                        download={zipDownload.filename}
-                        className="flex items-center gap-2 rounded-xl bg-green-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-green-700 hover:shadow-lg active:scale-[0.98]"
-                    >
-                        <Download className="h-5 w-5" />
-                        Download ZIP
-                    </a>
+                            {pdfDownloads.length > 1 && (
+                                <button
+                                    type="button"
+                                    onClick={() => pdfDownloads.forEach((file) => triggerDownload(file))}
+                                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-sky-700 hover:shadow-lg active:scale-[0.98] sm:w-auto"
+                                >
+                                    <Download className="h-5 w-5" />
+                                    {pdfDownloadLabel}
+                                </button>
+                            )}
+
+                            {zipDownload && (
+                                <a
+                                    href={zipDownload.url}
+                                    download={zipDownload.filename}
+                                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-green-700 hover:shadow-lg active:scale-[0.98] sm:w-auto"
+                                >
+                                    <Download className="h-5 w-5" />
+                                    {hasBothDownloadOptions ? 'Download ZIP (single file)' : 'Download ZIP'}
+                                </a>
+                            )}
+                        </div>
+                    </div>
                 )}
             </div>
         </div>
