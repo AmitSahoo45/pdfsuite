@@ -17,15 +17,6 @@ interface BottomActionBarProps {
     onCancelProcessing?: () => void;
 }
 
-const triggerDownload = (file: ToolResultFile) => {
-    const link = document.createElement('a');
-    link.href = file.url;
-    link.download = file.filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-};
-
 const BottomActionBar: React.FC<BottomActionBarProps> = ({
     actionLabel,
     actionIcon,
@@ -37,6 +28,7 @@ const BottomActionBar: React.FC<BottomActionBarProps> = ({
     progressLabel,
     onCancelProcessing,
 }) => {
+    const [isPdfListOpen, setIsPdfListOpen] = React.useState(false);
     const pdfDownloads: ToolResultFile[] = [];
     let zipDownload: ToolResultFile | null = null;
 
@@ -62,6 +54,11 @@ const BottomActionBar: React.FC<BottomActionBarProps> = ({
     const pdfDownloadLabel = pdfDownloads.length <= 1
         ? 'Download PDF'
         : `Download PDFs (${pdfDownloads.length})`;
+
+    React.useEffect(() => {
+        if (isProcessing || pdfDownloads.length <= 1)
+            setIsPdfListOpen(false);
+    }, [isProcessing, pdfDownloads.length, result]);
 
     return (
         <div className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white/95 backdrop-blur-sm">
@@ -133,14 +130,31 @@ const BottomActionBar: React.FC<BottomActionBarProps> = ({
                             )}
 
                             {pdfDownloads.length > 1 && (
-                                <button
-                                    type="button"
-                                    onClick={() => pdfDownloads.forEach((file) => triggerDownload(file))}
-                                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-sky-700 hover:shadow-lg active:scale-[0.98] sm:w-auto"
-                                >
-                                    <Download className="h-5 w-5" />
-                                    {pdfDownloadLabel}
-                                </button>
+                                <div className="w-full sm:w-auto">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsPdfListOpen((prev) => !prev)}
+                                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-6 py-3 text-base font-semibold text-white shadow-md transition-all hover:bg-sky-700 hover:shadow-lg active:scale-[0.98] sm:w-auto"
+                                    >
+                                        <Download className="h-5 w-5" />
+                                        {isPdfListOpen ? 'Hide PDF list' : pdfDownloadLabel}
+                                    </button>
+
+                                    {isPdfListOpen && (
+                                        <div className="mt-2 max-h-52 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 shadow-sm sm:absolute sm:bottom-16 sm:w-80">
+                                            {pdfDownloads.map((file) => (
+                                                <a
+                                                    key={file.url}
+                                                    href={file.url}
+                                                    download={file.filename}
+                                                    className="block rounded-md px-2 py-1.5 text-sm text-sky-700 transition hover:bg-sky-50"
+                                                >
+                                                    {file.filename}
+                                                </a>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             )}
 
                             {zipDownload && (

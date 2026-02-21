@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createZipBlob } from '@/service/zipService';
+import { createZipBlob, estimateZipSizeBytes } from '@/service/zipService';
 
 describe('zipService', () => {
     it('creates a valid zip signature', async () => {
@@ -21,5 +21,16 @@ describe('zipService', () => {
 
     it('throws when entries are empty', () => {
         expect(() => createZipBlob([])).toThrow('Cannot create a ZIP with no files.');
+    });
+
+    it('estimates zip size consistently with generated blob', () => {
+        const entries = [
+            { filename: 'a.txt', data: new TextEncoder().encode('hello') },
+            { filename: 'b.txt', data: new TextEncoder().encode('world') },
+        ];
+        const estimatedSize = estimateZipSizeBytes(entries);
+        const blob = createZipBlob(entries);
+
+        expect(estimatedSize).toBe(blob.size);
     });
 });
