@@ -65,7 +65,7 @@ export default function RootLayout({
         <html lang="en">
             <body
                 suppressHydrationWarning
-                className={`${montserrat.variable} font-sans antialiased text-stone-900 bg-white`}
+                className={`${montserrat.variable} font-sans antialiased text-stone-900 bg-white overflow-x-hidden`}
             >
                 <div className="flex min-h-screen flex-col">
                     <Header />

@@ -28,7 +28,7 @@ export function HomePageLanding() {
     return (
         <main>
             {/* Hero Section */}
-            <section className="relative overflow-hidden px-6 pb-16 pt-20 sm:pt-28">
+            <section className="relative overflow-hidden px-4 pb-16 pt-20 sm:px-6 sm:pt-28">
                 {/* Subtle background gradient */}
                 <div
                     className="absolute inset-0 -z-10 bg-gradient-to-b from-red-50/40 via-white to-white"
@@ -36,12 +36,12 @@ export function HomePageLanding() {
                 />
 
                 <div className="container mx-auto max-w-3xl text-center">
-                    <h1 className="font-montserrat text-4xl font-bold tracking-tight text-stone-900 sm:text-5xl lg:text-6xl">
+                    <h1 className="font-montserrat text-3xl font-bold tracking-tight text-stone-900 sm:text-4xl md:text-5xl lg:text-6xl">
                         Every PDF tool you need,{' '}
                         <span className="text-red-600">completely free</span>
                     </h1>
 
-                    <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-stone-500 sm:text-lg">
+                    <p className="mx-auto mt-5 max-w-2xl text-sm leading-relaxed text-stone-500 sm:text-base md:text-lg">
                         Merge, split, compress, convert, rotate, unlock and watermark PDFs.
                         All in your browser, no installation or signup needed.
                     </p>
@@ -71,7 +71,7 @@ export function HomePageLanding() {
             {/* Tools Grid */}
             <section
                 id="tools"
-                className="scroll-mt-20 px-6 pb-20"
+                className="scroll-mt-20 px-4 pb-20 sm:px-6"
                 aria-labelledby="tools-heading"
             >
                 <div className="container mx-auto max-w-7xl">
