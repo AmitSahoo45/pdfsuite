@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useState, useMemo, useEffect } from 'react';
+import { useCallback, useState, useMemo, useEffect, useRef } from 'react';
 import { toast } from 'react-hot-toast';
 import { useDropzone, FileRejection, type DropzoneState } from 'react-dropzone';
 import {
@@ -40,6 +40,17 @@ export function usePdfFiles(options?: UsePdfFilesOptions) {
     const [isLoading, setIsLoading] = useState(false);
     const [isGeneratingPreviews, setIsGeneratingPreviews] = useState(false);
     const [sortingOrder, setSortingOrder] = useState<boolean | null>(null);
+    const pdfFilesRef = useRef<Array<FileMeta>>([]);
+    const pendingPreviewSlotsRef = useRef(0);
+    const sortingOrderRef = useRef<boolean | null>(null);
+
+    useEffect(() => {
+        pdfFilesRef.current = pdfFiles;
+    }, [pdfFiles]);
+
+    useEffect(() => {
+        sortingOrderRef.current = sortingOrder;
+    }, [sortingOrder]);
 
     useEffect(() => {
         return () => { cleanupPdfPreviewWorker(); };
@@ -76,66 +87,95 @@ export function usePdfFiles(options?: UsePdfFilesOptions) {
         async (files: File[]) => {
             if (!files || files.length === 0) return;
 
-            if (pdfFiles.length + files.length > maxFiles) {
+            const currentCount = pdfFilesRef.current.length;
+            const availableSlots = Math.max(
+                0,
+                maxFiles - currentCount - pendingPreviewSlotsRef.current
+            );
+
+            if (availableSlots <= 0) {
                 toast.error(
                     `You can only add ${maxFiles} files in total. Please remove some files first.`
                 );
-                files = files.slice(0, maxFiles - pdfFiles.length);
-                if (files.length === 0) return;
+                return;
             }
 
+            let incomingFiles = files;
+            if (incomingFiles.length > availableSlots) {
+                toast.error(
+                    `You can only add ${maxFiles} files in total. Please remove some files first.`
+                );
+                incomingFiles = incomingFiles.slice(0, availableSlots);
+            }
+
+            if (incomingFiles.length === 0) return;
+
+            pendingPreviewSlotsRef.current += incomingFiles.length;
             setIsGeneratingPreviews(true);
-            const { PDFDocument } = await import('pdf-lib');
-            const newMetas: FileMeta[] = [];
 
-            for (const file of files) {
-                try {
-                    let pdfDoc;
+            try {
+                const { PDFDocument } = await import('pdf-lib');
+                const newMetas: FileMeta[] = [];
+
+                for (const file of incomingFiles) {
                     try {
-                        const buffer = await file.arrayBuffer();
-                        pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+                        let pdfDoc;
+                        try {
+                            const buffer = await file.arrayBuffer();
+                            pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+                        } catch (err) {
+                            console.error(`Failed loading PDF ${file.name}:`, err);
+                            toast.error(`Couldn't load ${file.name}. Is it a valid PDF?`);
+                            continue;
+                        }
+
+                        const pages = pdfDoc.getPageCount();
+                        if (pages === 0) {
+                            toast.error(`${file.name} has no pages. Skipping.`);
+                            continue;
+                        }
+
+                        let previewUrl: string;
+                        try {
+                            previewUrl = await generatePdfPreview(file);
+                        } catch (err) {
+                            console.error(`Preview failed for ${file.name}:`, err);
+                            previewUrl = FALLBACK_PREVIEW_URL;
+                            toast.error(`Couldn't generate preview for ${file.name}. Using placeholder.`);
+                        }
+
+                        const meta: Omit<FileMeta, 'id'> = {
+                            file,
+                            name: file.name,
+                            size: file.size,
+                            pages,
+                            rotation: 0,
+                            previewImageUrl: previewUrl,
+                        };
+                        const validatedMeta = FileMetaSchema.omit({ id: true }).parse(meta);
+                        newMetas.push({ ...validatedMeta, id: uuid(), file });
                     } catch (err) {
-                        console.error(`Failed loading PDF ${file.name}:`, err);
-                        toast.error(`Couldn't load ${file.name}. Is it a valid PDF?`);
+                        console.log(`Failed to process ${file.name}:`, err);
+                        toast.error(`Failed processing ${file.name}. Try re-uploading.`);
                         continue;
                     }
-
-                    const pages = pdfDoc.getPageCount();
-                    if (pages === 0) {
-                        toast.error(`${file.name} has no pages. Skipping.`);
-                        continue;
-                    }
-
-                    let previewUrl: string;
-                    try {
-                        previewUrl = await generatePdfPreview(file);
-                    } catch (err) {
-                        console.error(`Preview failed for ${file.name}:`, err);
-                        previewUrl = FALLBACK_PREVIEW_URL;
-                        toast.error(`Couldn't generate preview for ${file.name}. Using placeholder.`);
-                    }
-
-                    const meta: Omit<FileMeta, 'id'> = {
-                        file,
-                        name: file.name,
-                        size: file.size,
-                        pages,
-                        rotation: 0,
-                        previewImageUrl: previewUrl,
-                    };
-                    const validatedMeta = FileMetaSchema.omit({ id: true }).parse(meta);
-                    newMetas.push({ ...validatedMeta, id: uuid(), file });
-                } catch (err) {
-                    console.log(`Failed to process ${file.name}:`, err);
-                    toast.error(`Failed processing ${file.name}. Try re-uploading.`);
-                    continue;
                 }
-            }
 
-            setPdfFiles((prev) => [...prev, ...newMetas].slice(0, maxFiles));
-            setIsGeneratingPreviews(false);
+                setPdfFiles((prev) => {
+                    const next = [...prev, ...newMetas].slice(0, maxFiles);
+                    pdfFilesRef.current = next;
+                    return next;
+                });
+            } finally {
+                pendingPreviewSlotsRef.current = Math.max(
+                    0,
+                    pendingPreviewSlotsRef.current - incomingFiles.length
+                );
+                if (pendingPreviewSlotsRef.current === 0)
+                    setIsGeneratingPreviews(false);
+            }
         },
-        [pdfFiles, maxFiles]
+        [maxFiles]
     );
 
     // ── Drop rejection handler ───────────────────────────────────────────
@@ -207,17 +247,18 @@ export function usePdfFiles(options?: UsePdfFilesOptions) {
     const handleSortByName = useMemo(
         () =>
             debounce(() => {
-                setPdfFiles((prev) => {
-                    const nextOrder = !sortingOrder;
-                    setSortingOrder(nextOrder);
-                    return [...prev].sort((a, b) =>
+                const nextOrder = !sortingOrderRef.current;
+                sortingOrderRef.current = nextOrder;
+                setSortingOrder(nextOrder);
+                setPdfFiles((prev) =>
+                    [...prev].sort((a, b) =>
                         nextOrder
                             ? a.name.localeCompare(b.name)
                             : b.name.localeCompare(a.name)
-                    );
-                });
+                    )
+                );
             }, 200),
-        [sortingOrder]
+        []
     );
 
     const buttonsDisabled = isLoading || isGeneratingPreviews;
