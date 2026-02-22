@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "api/compress-pdf.py": {
+      "memory": 1024,
+      "maxDuration": 30,
+      "excludeFiles": "{.next,node_modules,tests}/**"
+    }
+  }
+}
