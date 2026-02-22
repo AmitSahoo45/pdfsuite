@@ -45,6 +45,7 @@ interface CompressApiResponse {
 
 const CLIENT_UPLOAD_ROUTE = '/api/get-upload-url';
 const COMPRESS_API_ROUTE = '/api/compress-pdf';
+const BLOB_DOWNLOAD_PROXY_ROUTE = '/api/blob-download';
 const SOURCE_UPLOAD_ACCESS: 'public' | 'private' = process.env.NEXT_PUBLIC_COMPRESS_SOURCE_UPLOAD_ACCESS === 'private'
     ? 'private'
     : 'public';
@@ -64,11 +65,30 @@ const buildUploadPathname = (filename: string): string => {
     return `compress-inputs/${yyyy}/${mm}/${dd}/${safeName}`;
 };
 
-const ensureDownloadUrl = (url: string, downloadUrl?: string | null): string => {
-    if (downloadUrl && typeof downloadUrl === 'string')
-        return downloadUrl;
+const isPrivateBlobUrl = (value: string): boolean => {
+    try {
+        const parsed = new URL(value);
+        return parsed.hostname.toLowerCase().endsWith('.private.blob.vercel-storage.com');
+    } catch {
+        return false;
+    }
+};
 
-    const next = new URL(url);
+const buildProxyDownloadUrl = (blobUrl: string, filename?: string): string => {
+    const next = new URL(BLOB_DOWNLOAD_PROXY_ROUTE, window.location.origin);
+    next.searchParams.set('url', blobUrl);
+    if (filename)
+        next.searchParams.set('filename', filename);
+    return next.toString();
+};
+
+const ensureDownloadUrl = (url: string, downloadUrl?: string | null, filename?: string): string => {
+    const candidate = (downloadUrl && typeof downloadUrl === 'string') ? downloadUrl : url;
+
+    if (isPrivateBlobUrl(url))
+        return buildProxyDownloadUrl(url, filename);
+
+    const next = new URL(candidate);
     next.searchParams.set('download', '1');
     return next.toString();
 };
@@ -142,7 +162,8 @@ export const compressPdfFile = async ({
             outputBlobUrl: data.compressedBlobUrl,
             outputDownloadUrl: ensureDownloadUrl(
                 data.compressedBlobUrl,
-                data.downloadUrl
+                data.downloadUrl,
+                data.outputFilename
             ),
             outputFilename: data.outputFilename,
             originalSizeBytes: data.originalSizeBytes,
