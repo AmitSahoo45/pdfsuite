@@ -16,12 +16,13 @@ const contentSecurityPolicy = [
   "frame-ancestors 'none'",
   "form-action 'self'",
   "object-src 'none'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
+  "script-src-elem 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://*.blob.vercel-storage.com",
-  "worker-src 'self' blob:",
+  "connect-src 'self' https://vercel.com https://api.vercel.com https://cdn.jsdelivr.net https://*.blob.vercel-storage.com",
+  "worker-src 'self' blob: https://cdn.jsdelivr.net",
 ].join("; ");
 
 const nextConfig: NextConfig = {
