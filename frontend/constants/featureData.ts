@@ -44,7 +44,7 @@ export const FEATURES: Feature[] = [
         description: 'Reduce file size while optimizing for maximal PDF quality.',
         icon: Minimize2,
         color: 'bg-green-600/10 text-green-700',
-        badge: 'Coming Soon!!',
+        badge: '',
         reDirectURL: '/compress-pdf'
     },
     {
