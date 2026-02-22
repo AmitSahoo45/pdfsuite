@@ -32,6 +32,7 @@ MAX_OUTPUT_BYTES = 25 * 1024 * 1024
 SOURCE_DOWNLOAD_TIMEOUT_SECONDS = 20
 MAX_PROCESS_SECONDS = 25
 ALLOWED_BLOB_HOST_SUFFIX = ".blob.vercel-storage.com"
+PRIVATE_BLOB_HOST_SUFFIX = ".private.blob.vercel-storage.com"
 ALLOWED_SOURCE_PATH_PREFIX = "/compress-inputs/"
 ALLOWED_LEVELS = {"recommended", "less"}
 MAX_ORIGINAL_FILENAME_CHARS = 200
@@ -422,12 +423,27 @@ def is_allowed_blob_content_type(content_type: str | None) -> bool:
     return ("application/pdf" in normalized) or ("application/octet-stream" in normalized)
 
 
+def is_private_blob_url(source_url: str) -> bool:
+    hostname = (urlparse(source_url).hostname or "").lower()
+    return hostname.endswith(PRIVATE_BLOB_HOST_SUFFIX)
+
+
 def download_blob_bytes(source_url: str) -> bytes:
     try:
+        headers = {"User-Agent": f"{APP_NAME}/1.0"}
+        if is_private_blob_url(source_url):
+            token = os.getenv("BLOB_READ_WRITE_TOKEN")
+            if not token:
+                raise HTTPException(
+                    status_code=500,
+                    detail="BLOB_READ_WRITE_TOKEN is required to read private Blob URLs.",
+                )
+            headers["Authorization"] = f"Bearer {token}"
+
         req = Request(
             source_url,
             method="GET",
-            headers={"User-Agent": f"{APP_NAME}/1.0"},
+            headers=headers,
         )
         with urlopen(req, timeout=SOURCE_DOWNLOAD_TIMEOUT_SECONDS) as response:
             content_type = response.headers.get("Content-Type")
