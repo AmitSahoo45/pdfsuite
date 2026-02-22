@@ -45,6 +45,9 @@ interface CompressApiResponse {
 
 const CLIENT_UPLOAD_ROUTE = '/api/get-upload-url';
 const COMPRESS_API_ROUTE = '/api/compress-pdf';
+const SOURCE_UPLOAD_ACCESS: 'public' | 'private' = process.env.NEXT_PUBLIC_COMPRESS_SOURCE_UPLOAD_ACCESS === 'private'
+    ? 'private'
+    : 'public';
 
 const sanitizeFilename = (filename: string): string => {
     const baseName = filename.replace(/\\/g, '/').split('/').pop() ?? 'document.pdf';
@@ -96,7 +99,8 @@ export const compressPdfFile = async ({
         throwIfAborted(signal);
 
         const uploaded = await upload(buildUploadPathname(file.name), file, {
-            access: 'public',
+            // Keep this env-toggled because `private` uploads require a private Blob store.
+            access: SOURCE_UPLOAD_ACCESS,
             contentType: file.type || 'application/pdf',
             handleUploadUrl: CLIENT_UPLOAD_ROUTE,
             abortSignal: signal,
@@ -117,7 +121,7 @@ export const compressPdfFile = async ({
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                sourceBlobUrl: uploaded.url,
+                sourceBlobUrl: uploaded.downloadUrl || uploaded.url,
                 level,
                 originalFilename: file.name,
             }),

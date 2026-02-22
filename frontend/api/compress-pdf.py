@@ -1,3 +1,4 @@
+from collections import deque
 import io
 import json
 import os
@@ -7,12 +8,14 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlparse
 from urllib.request import Request, urlopen
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request as FastAPIRequest
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import pikepdf
@@ -30,12 +33,63 @@ SOURCE_DOWNLOAD_TIMEOUT_SECONDS = 20
 MAX_PROCESS_SECONDS = 25
 ALLOWED_BLOB_HOST_SUFFIX = ".blob.vercel-storage.com"
 ALLOWED_SOURCE_PATH_PREFIX = "/compress-inputs/"
-ALLOWED_SOURCE_QUERY_PARAMS = {"download"}
 ALLOWED_LEVELS = {"recommended", "less"}
 MAX_ORIGINAL_FILENAME_CHARS = 200
 MAX_OUTPUT_FILENAME_CHARS = 180
 RECOMMENDED_MAX_IMAGE_EDGE = 2200
 MIN_VALID_PDF_BYTES = 5
+MAX_SOURCE_URL_CHARS = 4096
+MAX_SOURCE_URL_QUERY_CHARS = 2048
+MAX_SOURCE_URL_QUERY_PARAMS = 25
+DEFAULT_ALLOWED_BROWSER_ORIGINS = (
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+DEFAULT_COMPRESS_RATE_LIMIT_WINDOW_SECONDS = 5 * 60
+DEFAULT_COMPRESS_RATE_LIMIT_MAX_REQUESTS = 20
+DEFAULT_OUTPUT_BLOB_ACCESS = "public"
+
+
+def normalize_origin(origin: str) -> str | None:
+    value = origin.strip()
+    if not value:
+        return None
+
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if not parsed.hostname:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    if parsed.path not in ("", "/"):
+        return None
+    if parsed.query or parsed.fragment:
+        return None
+
+    host = parsed.hostname.lower()
+    port = parsed.port
+    default_port = 80 if parsed.scheme == "http" else 443
+    if port and port != default_port:
+        return f"{parsed.scheme}://{host}:{port}"
+    return f"{parsed.scheme}://{host}"
+
+
+def parse_allowed_browser_origins() -> set[str]:
+    raw = os.getenv("COMPRESS_API_ALLOWED_ORIGINS", "").strip()
+    candidates = [item.strip() for item in raw.split(",") if item.strip()] if raw else list(DEFAULT_ALLOWED_BROWSER_ORIGINS)
+
+    origins: set[str] = set()
+    for candidate in candidates:
+        normalized = normalize_origin(candidate)
+        if normalized:
+            origins.add(normalized)
+    return origins
+
+
+ALLOWED_BROWSER_ORIGINS = parse_allowed_browser_origins()
+_RATE_LIMIT_LOCK = Lock()
+_RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
 
 
 class CompressionLevel(str, Enum):
@@ -44,7 +98,7 @@ class CompressionLevel(str, Enum):
 
 
 class CompressPdfRequest(BaseModel):
-    sourceBlobUrl: str = Field(min_length=1)
+    sourceBlobUrl: str = Field(min_length=1, max_length=MAX_SOURCE_URL_CHARS)
     level: CompressionLevel = CompressionLevel.recommended
     originalFilename: str | None = None
 
@@ -60,6 +114,14 @@ class CompressPdfResponse(BaseModel):
 
 
 app = FastAPI(title=APP_NAME)
+if ALLOWED_BROWSER_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=sorted(ALLOWED_BROWSER_ORIGINS),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type"],
+    )
 
 
 @app.get("/")
@@ -72,13 +134,15 @@ def healthcheck() -> dict[str, str]:
 @app.post("/", response_model=CompressPdfResponse)
 @app.post("/api/compress-pdf", response_model=CompressPdfResponse)
 @app.post("/api/compress-pdf/", response_model=CompressPdfResponse)
-def compress_pdf_endpoint(payload: CompressPdfRequest) -> CompressPdfResponse:
+def compress_pdf_endpoint(payload: CompressPdfRequest, request: FastAPIRequest) -> CompressPdfResponse:
     request_id = uuid.uuid4().hex[:12]
     started_at = time.monotonic()
+    client_ip = get_client_ip(request)
 
     log_event(
         "compress.request.received",
         requestId=request_id,
+        clientIp=client_ip,
         level=str(payload.level.value if isinstance(payload.level, CompressionLevel) else payload.level),
         hasOriginalFilename=bool(payload.originalFilename),
     )
@@ -88,6 +152,8 @@ def compress_pdf_endpoint(payload: CompressPdfRequest) -> CompressPdfResponse:
 
     source_url = payload.sourceBlobUrl.strip()
     try:
+        enforce_allowed_request_origin(request)
+        enforce_rate_limit(client_ip)
         validate_original_filename(payload.originalFilename)
         validate_blob_source_url(source_url)
 
@@ -120,10 +186,12 @@ def compress_pdf_endpoint(payload: CompressPdfRequest) -> CompressPdfResponse:
         reduction_percent = 0
         if original_size > 0:
             reduction_percent = round((1 - (compressed_size / original_size)) * 100)
+        reduction_percent = max(0, reduction_percent)
 
         output_filename = build_output_filename(payload.originalFilename)
         upload_result = upload_output_blob(compressed_bytes, output_filename)
         enforce_time_budget(started_at, "uploading compressed PDF")
+        delete_source_blob_best_effort(source_url, request_id=request_id)
 
         elapsed_ms = round((time.monotonic() - started_at) * 1000)
         log_event(
@@ -169,6 +237,7 @@ def compress_pdf_endpoint(payload: CompressPdfRequest) -> CompressPdfResponse:
         log_event(
             "compress.request.failed",
             requestId=request_id,
+            clientIp=client_ip,
             errorType=type(exc).__name__,
             elapsedMs=round((time.monotonic() - started_at) * 1000),
         )
@@ -207,6 +276,93 @@ def log_event(event: str, **fields: Any) -> None:
         print(f"[{APP_NAME}] {event}: {fields}")
 
 
+def read_int_env(name: str, default: int, *, minimum: int = 1) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, value)
+
+
+def get_client_ip(request: FastAPIRequest) -> str:
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    x_real_ip = request.headers.get("x-real-ip")
+    if x_real_ip:
+        return x_real_ip.strip()
+    return "unknown"
+
+
+def build_request_origin(request: FastAPIRequest) -> str | None:
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    scheme = (forwarded_proto.split(",")[0].strip() if forwarded_proto else request.url.scheme or "https").lower()
+    forwarded_host = request.headers.get("x-forwarded-host")
+    host = (forwarded_host.split(",")[0].strip() if forwarded_host else (request.headers.get("host") or request.url.netloc))
+    if not host:
+        return None
+    return normalize_origin(f"{scheme}://{host}")
+
+
+def enforce_allowed_request_origin(request: FastAPIRequest) -> None:
+    origin = request.headers.get("origin")
+    if not origin:
+        return
+
+    normalized_origin = normalize_origin(origin)
+    if not normalized_origin:
+        raise HTTPException(status_code=403, detail="Invalid Origin header.")
+
+    request_origin = build_request_origin(request)
+    if request_origin and normalized_origin == request_origin:
+        return
+    if normalized_origin in ALLOWED_BROWSER_ORIGINS:
+        return
+
+    raise HTTPException(status_code=403, detail="Origin is not allowed.")
+
+
+def enforce_rate_limit(client_ip: str) -> None:
+    window_seconds = read_int_env(
+        "COMPRESS_RATE_LIMIT_WINDOW_SECONDS",
+        DEFAULT_COMPRESS_RATE_LIMIT_WINDOW_SECONDS,
+    )
+    max_requests = read_int_env(
+        "COMPRESS_RATE_LIMIT_MAX_REQUESTS",
+        DEFAULT_COMPRESS_RATE_LIMIT_MAX_REQUESTS,
+    )
+    now = time.monotonic()
+    bucket_key = f"compress:{client_ip}"
+
+    retry_after_seconds = 1
+    with _RATE_LIMIT_LOCK:
+        bucket = _RATE_LIMIT_BUCKETS.setdefault(bucket_key, deque())
+        cutoff = now - window_seconds
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+
+        if len(bucket) >= max_requests:
+            retry_after_seconds = max(1, int(window_seconds - (now - bucket[0])))
+        else:
+            bucket.append(now)
+            if len(_RATE_LIMIT_BUCKETS) > 5000:
+                empty_keys = [key for key, values in _RATE_LIMIT_BUCKETS.items() if not values]
+                for key in empty_keys:
+                    _RATE_LIMIT_BUCKETS.pop(key, None)
+            return
+
+    raise HTTPException(
+        status_code=429,
+        detail="Too many compression requests. Please wait before trying again.",
+        headers={"Retry-After": str(retry_after_seconds)},
+    )
+
+
 def enforce_time_budget(started_at: float, stage: str) -> None:
     elapsed = time.monotonic() - started_at
     if elapsed > MAX_PROCESS_SECONDS:
@@ -229,6 +385,12 @@ def validate_original_filename(filename: str | None) -> None:
 
 
 def validate_blob_source_url(source_url: str) -> None:
+    if len(source_url) > MAX_SOURCE_URL_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Blob URL is too long. Max length is {MAX_SOURCE_URL_CHARS} characters.",
+        )
+
     parsed = urlparse(source_url)
     if parsed.scheme != "https":
         raise HTTPException(status_code=400, detail="Only https Blob URLs are allowed.")
@@ -245,10 +407,12 @@ def validate_blob_source_url(source_url: str) -> None:
     if not parsed.path.startswith(ALLOWED_SOURCE_PATH_PREFIX):
         raise HTTPException(status_code=400, detail="Blob URL must be a compress-pdf input upload.")
 
+    if len(parsed.query) > MAX_SOURCE_URL_QUERY_CHARS:
+        raise HTTPException(status_code=400, detail="Blob URL query string is too long.")
     if parsed.query:
-        for key, _ in parse_qsl(parsed.query, keep_blank_values=True):
-            if key not in ALLOWED_SOURCE_QUERY_PARAMS:
-                raise HTTPException(status_code=400, detail="Blob URL contains unsupported query parameters.")
+        query_items = parse_qsl(parsed.query, keep_blank_values=True)
+        if len(query_items) > MAX_SOURCE_URL_QUERY_PARAMS:
+            raise HTTPException(status_code=400, detail="Blob URL contains too many query parameters.")
 
 
 def is_allowed_blob_content_type(content_type: str | None) -> bool:
@@ -325,6 +489,18 @@ def build_output_blob_path(output_filename: str) -> str:
     return f"compress-outputs/{date_prefix}/{uuid.uuid4().hex}_{output_filename}"
 
 
+def get_output_blob_access() -> str:
+    raw = (os.getenv("COMPRESS_OUTPUT_BLOB_ACCESS") or DEFAULT_OUTPUT_BLOB_ACCESS).strip().lower()
+    if raw in {"public", "private"}:
+        return raw
+    log_event(
+        "compress.output_blob.invalid_access_config",
+        configuredValue=raw,
+        fallbackAccess=DEFAULT_OUTPUT_BLOB_ACCESS,
+    )
+    return DEFAULT_OUTPUT_BLOB_ACCESS
+
+
 def upload_output_blob(data: bytes, output_filename: str) -> dict[str, str | None]:
     if vercel_blob is None:
         raise HTTPException(status_code=500, detail="Vercel Blob SDK is unavailable.")
@@ -336,29 +512,40 @@ def upload_output_blob(data: bytes, output_filename: str) -> dict[str, str | Non
             temp_path = tmp.name
             tmp.write(data)
 
+        access = get_output_blob_access()
         uploaded = vercel_blob.upload_file(
             local_path=temp_path,
             path=blob_path,
-            access="public",
+            access=access,
         )
 
         uploaded_data = coerce_blob_result(uploaded)
         blob_url = uploaded_data.get("url")
+        download_url = uploaded_data.get("download_url") or uploaded_data.get("downloadUrl")
         if not blob_url:
             raise HTTPException(
                 status_code=500,
                 detail="Blob upload completed but no URL was returned.",
             )
+        if access == "private" and not download_url:
+            raise HTTPException(
+                status_code=500,
+                detail="Blob upload completed but no private download URL was returned.",
+            )
         return {
             "url": blob_url,
-            "downloadUrl": uploaded_data.get("download_url") or uploaded_data.get("downloadUrl"),
+            "downloadUrl": download_url,
         }
     except HTTPException:
         raise
     except Exception as exc:
+        log_event(
+            "compress.output_blob.upload_failed",
+            errorType=type(exc).__name__,
+        )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to upload compressed PDF to Blob: {exc}",
+            detail="Failed to upload compressed PDF to Blob.",
         ) from exc
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -379,6 +566,51 @@ def coerce_blob_result(uploaded: Any) -> dict[str, Any]:
         if hasattr(uploaded, key):
             result[key] = getattr(uploaded, key)
     return result
+
+
+def delete_source_blob_best_effort(source_url: str, *, request_id: str) -> None:
+    if vercel_blob is None:
+        return
+
+    enabled = (os.getenv("COMPRESS_DELETE_SOURCE_BLOB", "1").strip().lower() not in {"0", "false", "no"})
+    if not enabled:
+        return
+
+    delete_fn = (
+        getattr(vercel_blob, "delete", None)
+        or getattr(vercel_blob, "del_", None)
+        or getattr(vercel_blob, "del", None)
+    )
+    if not callable(delete_fn):
+        log_event("compress.source_blob.delete_unavailable", requestId=request_id)
+        return
+
+    parsed = urlparse(source_url)
+    candidates = [source_url]
+    pathname = parsed.path.lstrip("/")
+    if pathname and pathname not in candidates:
+        candidates.append(pathname)
+
+    for candidate in candidates:
+        try:
+            delete_fn(candidate)
+            log_event("compress.source_blob.deleted", requestId=request_id, via="single")
+            return
+        except TypeError:
+            try:
+                delete_fn([candidate])
+                log_event("compress.source_blob.deleted", requestId=request_id, via="list")
+                return
+            except Exception as exc:
+                last_error = exc
+        except Exception as exc:
+            last_error = exc
+
+    log_event(
+        "compress.source_blob.delete_failed",
+        requestId=request_id,
+        errorType=type(last_error).__name__ if "last_error" in locals() else "UnknownError",
+    )
 
 
 def compress_pdf_bytes(pdf_bytes: bytes, level: CompressionLevel, started_at: float) -> bytes:
@@ -448,56 +680,60 @@ def recompress_images(
     except Exception:
         return
 
+    previous_load_truncated_images = getattr(ImageFile, "LOAD_TRUNCATED_IMAGES", False)
     ImageFile.LOAD_TRUNCATED_IMAGES = True
     resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.LANCZOS)
 
-    for page in pdf.pages:
-        enforce_time_budget(started_at, "processing embedded images")
-        try:
-            resources = page.get("/Resources", {})
-            xobjects = resources.get("/XObject", {})
-        except Exception:
-            continue
-
-        for _, obj_ref in getattr(xobjects, "items", lambda: [])():
+    try:
+        for page in pdf.pages:
+            enforce_time_budget(started_at, "processing embedded images")
             try:
-                stream_obj = obj_ref
-                if not isinstance(stream_obj, pikepdf.Stream):
-                    continue
-                if stream_obj.get("/Subtype") != "/Image":
-                    continue
-
-                filters = stream_obj.get("/Filter")
-                filter_name = ""
-                if isinstance(filters, pikepdf.Array) and len(filters) > 0:
-                    filter_name = str(filters[-1])
-                elif filters:
-                    filter_name = str(filters)
-
-                if "/DCTDecode" not in filter_name:
-                    continue
-
-                raw_jpeg = stream_obj.read_raw_bytes()
-                img = Image.open(io.BytesIO(raw_jpeg))
-
-                if img.mode not in ("L", "RGB", "CMYK"):
-                    img = img.convert("RGB")
-
-                if max_image_edge and max_image_edge > 0:
-                    longest_edge = max(img.size) if img.size else 0
-                    if longest_edge > max_image_edge:
-                        scale = max_image_edge / float(longest_edge)
-                        resized = (
-                            max(1, int(img.size[0] * scale)),
-                            max(1, int(img.size[1] * scale)),
-                        )
-                        img = img.resize(resized, resample=resampling)
-
-                out = io.BytesIO()
-                img.save(out, format="JPEG", quality=jpeg_quality, optimize=True, progressive=True)
-                next_jpeg = out.getvalue()
-                if len(next_jpeg) >= len(raw_jpeg):
-                    continue
-                stream_obj.write(next_jpeg, filter=pikepdf.Name("/DCTDecode"))
+                resources = page.get("/Resources", {})
+                xobjects = resources.get("/XObject", {})
             except Exception:
                 continue
+
+            for _, obj_ref in getattr(xobjects, "items", lambda: [])():
+                try:
+                    stream_obj = obj_ref
+                    if not isinstance(stream_obj, pikepdf.Stream):
+                        continue
+                    if stream_obj.get("/Subtype") != "/Image":
+                        continue
+
+                    filters = stream_obj.get("/Filter")
+                    filter_name = ""
+                    if isinstance(filters, pikepdf.Array) and len(filters) > 0:
+                        filter_name = str(filters[-1])
+                    elif filters:
+                        filter_name = str(filters)
+
+                    if "/DCTDecode" not in filter_name:
+                        continue
+
+                    raw_jpeg = stream_obj.read_raw_bytes()
+                    img = Image.open(io.BytesIO(raw_jpeg))
+
+                    if img.mode not in ("L", "RGB", "CMYK"):
+                        img = img.convert("RGB")
+
+                    if max_image_edge and max_image_edge > 0:
+                        longest_edge = max(img.size) if img.size else 0
+                        if longest_edge > max_image_edge:
+                            scale = max_image_edge / float(longest_edge)
+                            resized = (
+                                max(1, int(img.size[0] * scale)),
+                                max(1, int(img.size[1] * scale)),
+                            )
+                            img = img.resize(resized, resample=resampling)
+
+                    out = io.BytesIO()
+                    img.save(out, format="JPEG", quality=jpeg_quality, optimize=True, progressive=True)
+                    next_jpeg = out.getvalue()
+                    if len(next_jpeg) >= len(raw_jpeg):
+                        continue
+                    stream_obj.write(next_jpeg, filter=pikepdf.Name("/DCTDecode"))
+                except Exception:
+                    continue
+    finally:
+        ImageFile.LOAD_TRUNCATED_IMAGES = previous_load_truncated_images
