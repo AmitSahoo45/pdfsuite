@@ -28,7 +28,7 @@ export default function Home() {
             offers: {
               '@type': 'Offer',
               price: '0',
-              priceCurrency: 'USD',
+              priceCurrency: 'INR',
             },
             featureList: [
               'Merge PDF', 'Split PDF', 'Compress PDF',
