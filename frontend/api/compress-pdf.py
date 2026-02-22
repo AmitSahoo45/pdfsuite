@@ -63,11 +63,15 @@ app = FastAPI(title=APP_NAME)
 
 
 @app.get("/")
+@app.get("/api/compress-pdf")
+@app.get("/api/compress-pdf/")
 def healthcheck() -> dict[str, str]:
     return {"status": "ok", "service": APP_NAME}
 
 
 @app.post("/", response_model=CompressPdfResponse)
+@app.post("/api/compress-pdf", response_model=CompressPdfResponse)
+@app.post("/api/compress-pdf/", response_model=CompressPdfResponse)
 def compress_pdf_endpoint(payload: CompressPdfRequest) -> CompressPdfResponse:
     request_id = uuid.uuid4().hex[:12]
     started_at = time.monotonic()
